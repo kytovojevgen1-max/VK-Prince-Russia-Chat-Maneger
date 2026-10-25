@@ -706,7 +706,7 @@ async def chat_handler(message: Message):
         chat_data["mutes"][str(target_id)] = expire_timestamp
         save_db(db)
         
-        await message.answer(f"🤫 Пользователю [id{target_id}|выдан мут] на `{mins минут}`.\n⚠️ *Его сообщения будут автоматически удаляться!*")
+        await message.answer(f"🤫 Пользователю [id{target_id}|выдан мут] на {mins} минут.\n⚠️ *Его сообщения будут автоматически удаляться!*")
 
     elif cmd in ["unmute", "анмут"]:
         target_id, _ = await resolve_target(message, params)
@@ -715,7 +715,7 @@ async def chat_handler(message: Message):
         
         t_str = str(target_id)
         if t_str in chat_data["mutes"]:
-            del chat_data["mutes"][str(t_str)]
+            del chat_data["mutes"][t_str]
             save_db(db)
             await message.answer(f"🔊 С пользователя [id{target_id}|снят мут].")
         else:
