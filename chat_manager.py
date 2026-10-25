@@ -1,11 +1,30 @@
 import os
 import json
 import time
+from threading import Thread
+from flask import Flask
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
 # =====================================================================
-# НАСТРОЙКИ ЧАТ-МЕНЕДЖЕРА
+# 1. ВЕБ-СЕРВЕР ДЛЯ RENDER (ОБЯЗАТЕЛЬНО С ПОРТОМ)
+# =====================================================================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Prince Russia Chat Manager: ACTIVE 24/7"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# Запускаем Flask в отдельном потоке сразу при старте
+Thread(target=run_flask, daemon=True).start()
+
+
+# =====================================================================
+# 2. НАСТРОЙКИ И БАЗЫ ДАННЫХ
 # =====================================================================
 TOKEN = "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq03EeLvxI2gZwJSVvuWMv0eP7vv59FFJvPNYWpRI7R2nzXM0gbobnLpmRaI3yM751Cml4ZOPDcIc380c3hekN0jgZ3QeP76p9hn1Sw6kwK6mOCyomwB33nVy1uBGAbC0mDQpu5eiq2HlVDAKi4YjHYw"
 bot = Bot(token=TOKEN)
@@ -31,8 +50,8 @@ def save_db(data):
         print(f"Ошибка сохранения базы: {e}")
 
 db = load_db()
-if "chats" not in db: db["chats"] = {}         # {str(peer_id): {"members": {}, "bans": {}}}
-if "global_chats" not in db: db["global_chats"] = [] # Список всех чатов для рассылки из ЛС
+if "chats" not in db: db["chats"] = {}
+if "global_chats" not in db: db["global_chats"] = []
 
 def get_chat_data(peer_id):
     p_str = str(peer_id)
@@ -41,7 +60,6 @@ def get_chat_data(peer_id):
     return db["chats"][p_str]
 
 async def resolve_target(message: Message, args: list):
-    """Ищет ID пользователя по ответу на сообщение, юзернейму или ID"""
     if message.reply_message:
         return message.reply_message.from_id
     if not args:
@@ -51,7 +69,6 @@ async def resolve_target(message: Message, args: list):
     if identifier.isdigit():
         return int(identifier)
         
-    # Ищем по юзернейму среди участников чата или через API
     try:
         user_info = await bot.api.users.get(user_ids=[identifier])
         if user_info:
@@ -62,7 +79,7 @@ async def resolve_target(message: Message, args: list):
 
 
 # =====================================================================
-# 1. ПАНЕЛЬ ВЛАДЕЛЬЦА В ЛИЧНЫХ СООБЩЕНИЯХ
+# 3. ПАНЕЛЬ ВЛАДЕЛЬЦА В ЛИЧНЫХ СООБЩЕНИЯХ
 # =====================================================================
 
 @bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
@@ -86,7 +103,6 @@ async def private_start(message: Message):
 @bot.on.private_message(text="📢 Рассылка по всем чатам")
 async def private_broadcast_prompt(message: Message):
     if message.from_id != MAIN_OWNER_ID: return
-    # Состояние через временный файл или глобальную переменную можно зафиксировать
     await message.answer("✍️ Введите команду в формате:\n`/broadcast ваш_текст_рассылки`")
 
 @bot.on.private_message(text=lambda text: text and text.startswith("/broadcast"))
@@ -110,22 +126,19 @@ async def private_site(message: Message):
 
 
 # =====================================================================
-# 2. РАБОТА В БЕСЕДАХ (ЧАТАХ)
+# 4. РАБОТА В БЕСЕДАХ (ЧАТАХ)
 # =====================================================================
 
 @bot.on.chat_message()
 async def chat_handler(message: Message):
     peer_id = message.peer_id
-    p_str = str(peer_id)
     
-    # Сохраняем чат в общую базу для рассылок из ЛС
     if peer_id not in db["global_chats"]:
         db["global_chats"].append(peer_id)
         save_db(db)
 
     chat_data = get_chat_data(peer_id)
 
-    # Если бота добавили в беседу
     if message.action and message.action.type == "chat_invite_user":
         try:
             bot_id = (await bot.api.users.get())[0].id
@@ -144,7 +157,6 @@ async def chat_handler(message: Message):
     text = message.text
     if not text: return
     
-    # Очистка упоминания бота
     clean_text = text.lower()
     for mention in ["[club" + str(message.group_id) + "|@", "@club", "@public"]:
         if mention in clean_text:
@@ -156,8 +168,6 @@ async def chat_handler(message: Message):
     cmd = args[0] if args else ""
     params = args[1:] if len(args) > 1 else []
 
-    # --- КОМАНДЫ ЧАТА ---
-    
     if cmd in ["/help", "!хелп", "команды", "📋 команды"]:
         help_text = (
             "🛠 **КОМАНДЫ ЧАТ-МЕНЕДЖЕРА:**\n"
@@ -179,13 +189,11 @@ async def chat_handler(message: Message):
     elif cmd in ["сайт", "🌐 сайт", "ссылки"]:
         await message.answer("🌐 Официальный сайт Prince Russia (скачать игру + бонус 25кк + 1000 BC): https://site-prince-russia.samp.date/")
 
-    # --- ВЫДАЧА И СНЯТИЕ РОЛИ (1-8) ---
     elif cmd in ["/role", "роль"]:
         target_id = await resolve_target(message, params)
         if not target_id:
             return await message.answer("❌ Укажите пользователя (@юзернейм, ID или ответьте на его сообщение)!")
         
-        # Ищем цифру роли (1-8) в аргументах
         role_lvl = None
         for p in params:
             if p.isdigit() and 1 <= int(p) <= 8:
@@ -234,13 +242,11 @@ async def chat_handler(message: Message):
             msg += f"• [id{m_int}|{m_name}] ➔ **Ранг {lvl}**\n"
         await message.answer(msg)
 
-    # --- МОДЕРАЦИЯ (БАН, РАЗБАН, КИК) ---
     elif cmd in ["/ban", "бан"]:
         target_id = await resolve_target(message, params)
         if not target_id:
             return await message.answer("❌ Укажите кого забанить!")
             
-        # Формируем причину и срок из оставшихся аргументов
         reason_args = [p for p in params if not (p.isdigit() and int(p) <= 8) and not p.replace("@","").isdigit()]
         term = "Навсегда"
         reason = "Не указана"
