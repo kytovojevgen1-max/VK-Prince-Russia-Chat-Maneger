@@ -80,7 +80,6 @@ async def resolve_target(message: Message, args: list):
     if not args:
         return None
     
-    # Очищаем аргумент от лишнего мусора (ссылок, собачек, id)
     identifier = args[0].strip().replace("https://vk.com/", "").replace("vk.com/", "").replace("@", "").replace("id", "")
     if identifier.isdigit():
         return int(identifier)
@@ -237,12 +236,12 @@ async def chat_handler(message: Message):
                 break
                 
         if not role_lvl:
-            return await message.answer("❌ Укажите уровень роли от 1 до 8 (например: `rnick @durov 5` или `rnick [ответ на сообщение] 5`)!")
+            return await message.answer("❌ Укажите уровень роли от 1 до 8 (например: `rnick @durov 5`)!")
             
         if str(target_id) not in chat_data["members"]:
             chat_data["members"][str(target_id)] = {"level": role_lvl, "nickname": ""}
         else:
-            chat_data["members"][str(target_id]]["level"] = role_lvl
+            chat_data["members"][str(target_id)]["level"] = role_lvl
         save_db(db)
         
         r_name = chat_data["role_names"].get(str(role_lvl), f"Ранг {role_lvl}")
@@ -266,7 +265,6 @@ async def chat_handler(message: Message):
         if not target_id:
             return await message.answer("❌ Укажите пользователя!")
             
-        # Если отвечали на сообщение, то все параметры — это ник. Если нет, то пропускаем первый аргумент (юз/айди)
         if message.reply_message:
             new_nick = " ".join(params)
         else:
