@@ -127,27 +127,74 @@ async def resolve_target(message: Message, args: list):
 
 
 # =====================================================================
-# 3. ПАНЕЛЬ В ЛИЧНЫХ СООБЩЕНИЯХ (РАССЫЛКА)
+# 3. ПАНЕЛЬ В ЛИЧНЫХ СООБЩЕНИЯХ С КНОПКАМИ И УПРАВЛЕНИЕМ ДОСТУПОМ
 # =====================================================================
 
 @bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
 async def private_start(message: Message):
     uid = message.from_id
     if uid in user_states: del user_states[uid]
-    has_broadcast_rights = (uid == MAIN_OWNER_ID or uid in db["broadcast_admins"])
+    is_main_owner = (uid == MAIN_OWNER_ID)
+    has_broadcast_rights = (is_main_owner or uid in db["broadcast_admins"])
     
     keyboard = Keyboard(one_time=False, inline=False)
     keyboard.add(Text("🌐 Наш сайт"), color=KeyboardButtonColor.POSITIVE)
     if has_broadcast_rights:
         keyboard.row()
         keyboard.add(Text("📢 Рассылка по всем чатам"), color=KeyboardButtonColor.NEGATIVE)
+    if is_main_owner:
+        keyboard.row()
+        keyboard.add(Text("⚙️ Панель админов рассылки"), color=KeyboardButtonColor.PRIMARY)
     
     await message.answer(
         "👑 **PRINCE RUSSIA — ULTIMATE 1000x MANAGER** 👑\n"
-        "Я управляю порядком в ваших беседах и глобальной рассылкой.\n"
+        "Главная панель управления проектом в ЛС.\n"
         "Добавьте меня в беседу и выдайте права администратора!",
         keyboard=keyboard.get_json()
     )
+
+@bot.on.private_message(text="⚙️ Панель админов рассылки")
+async def private_admin_panel(message: Message):
+    if message.from_id != MAIN_OWNER_ID:
+        return await message.answer("❌ Эта панель доступна только главному владельцу бота!")
+    
+    admins_list = ", ".join([f"[id{aid}|ID {aid}]" for aid in db["broadcast_admins"]])
+    
+    kb = Keyboard(one_time=False, inline=True)
+    kb.add(Text("➕ Выдать доступ по ID"), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Text("➖ Забрать доступ"), color=KeyboardButtonColor.NEGATIVE)
+    kb.row()
+    kb.add(Text("🔙 Главное меню"), color=KeyboardButtonColor.PRIMARY)
+    
+    await message.answer(
+        f"⚙️ **ПАНЕЛЬ УПРАВЛЕНИЯ ДОСТУПОМ К РАССЫЛКЕ**\n"
+        f"───────────────────────────────\n"
+        f"👥 Текущие администраторы рассылки:\n{admins_list}\n\n"
+        f"Выберите действие кнопкой ниже или используйте команды:\n"
+        f"• `/addowner [ID]` — выдать доступ\n"
+        f"• `/removeowner [ID]` — забрать доступ",
+        keyboard=kb.get_json()
+    )
+
+@bot.on.private_message(text="➕ Выдать доступ по ID")
+async def private_add_prompt(message: Message):
+    if message.from_id != MAIN_OWNER_ID: return
+    user_states[message.from_id] = "waiting_add_admin_id"
+    
+    kb = Keyboard(one_time=False, inline=True)
+    kb.add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE)
+    
+    await message.answer("✍️ Введите **VK ID** пользователя (например: `123456789`), которому хотите выдать доступ к панели рассылки:", keyboard=kb.get_json())
+
+@bot.on.private_message(text="➖ Забрать доступ")
+async def private_remove_prompt(message: Message):
+    if message.from_id != MAIN_OWNER_ID: return
+    user_states[message.from_id] = "waiting_remove_admin_id"
+    
+    kb = Keyboard(one_time=False, inline=True)
+    kb.add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE)
+    
+    await message.answer("✍️ Введите **VK ID** пользователя, у которого нужно забрать доступ к рассылке:", keyboard=kb.get_json())
 
 @bot.on.private_message(text="📢 Рассылка по всем чатам")
 async def private_broadcast_prompt(message: Message):
@@ -172,9 +219,44 @@ async def private_text_handler(message: Message):
     text = message.text
     if not text: return
 
-    has_broadcast_rights = (uid == MAIN_OWNER_ID or uid in db["broadcast_admins"])
+    is_main_owner = (uid == MAIN_OWNER_ID)
+    has_broadcast_rights = (is_main_owner or uid in db["broadcast_admins"])
+    current_state = user_states.get(uid)
 
-    if uid in user_states and user_states.get(uid) == "waiting_broadcast_text" and has_broadcast_rights:
+    # Обработка ввода ID для выдачи админки через кнопку
+    if current_state == "waiting_add_admin_id" and is_main_owner:
+        del user_states[uid]
+        clean_id = text.strip().replace("https://vk.com/", "").replace("id", "")
+        if clean_id.isdigit():
+            target_id = int(clean_id)
+            if target_id not in db["broadcast_admins"]:
+                db["broadcast_admins"].append(target_id)
+                save_db(db)
+                return await message.answer(f"✅ Успешно! Пользователю [id{target_id}|ID {target_id}] выдан доступ к рассылке.")
+            else:
+                return await message.answer("ℹ️ У этого пользователя уже есть доступ.")
+        else:
+            return await message.answer("❌ Неверный формат ID. Введите чисто цифры (например: `897082738`).")
+
+    # Обработка ввода ID для снятия админки через кнопку
+    if current_state == "waiting_remove_admin_id" and is_main_owner:
+        del user_states[uid]
+        clean_id = text.strip().replace("https://vk.com/", "").replace("id", "")
+        if clean_id.isdigit():
+            target_id = int(clean_id)
+            if target_id == MAIN_OWNER_ID:
+                return await message.answer("❌ Нельзя забрать доступ у главного владельца!")
+            if target_id in db["broadcast_admins"]:
+                db["broadcast_admins"].remove(target_id)
+                save_db(db)
+                return await message.answer(f"🟢 Успешно! У пользователя [id{target_id}|ID {target_id}] забран доступ.")
+            else:
+                return await message.answer("❌ У этого пользователя не было доступа.")
+        else:
+            return await message.answer("❌ Неверный формат ID.")
+
+    # Обработка текста рассылки
+    if current_state == "waiting_broadcast_text" and has_broadcast_rights:
         del user_states[uid]
         count = 0
         for chat_id in db.get("global_chats", []):
@@ -186,12 +268,16 @@ async def private_text_handler(message: Message):
         
         keyboard = Keyboard(one_time=False, inline=False)
         keyboard.add(Text("🌐 Наш сайт"), color=KeyboardButtonColor.POSITIVE)
-        keyboard.row()
-        keyboard.add(Text("📢 Рассылка по всем чатам"), color=KeyboardButtonColor.NEGATIVE)
+        if has_broadcast_rights:
+            keyboard.row()
+            keyboard.add(Text("📢 Рассылка по всем чатам"), color=KeyboardButtonColor.NEGATIVE)
+        if is_main_owner:
+            keyboard.row()
+            keyboard.add(Text("⚙️ Панель админов рассылки"), color=KeyboardButtonColor.PRIMARY)
 
         return await message.answer(f"✅ Рассылка успешно завершена! Отправлено в беседы: `{count}` шт.", keyboard=keyboard.get_json())
     
-    await message.answer("❌ В личных сообщениях я не работаю как менеджер. Добавь меня в беседу!")
+    await message.answer("❌ В личных сообщениях я работаю через меню. Напишите «Меню» или «/start».")
 
 
 # =====================================================================
@@ -236,7 +322,7 @@ async def chat_handler(message: Message):
                 kb.add(Text("🌐 Сайт"), color=KeyboardButtonColor.POSITIVE)
                 kb.add(Text("📋 Меню"), color=KeyboardButtonColor.PRIMARY)
                 await message.answer(
-                    "👋 Привет! Я **Чат-менеджер Prince Russia** (Ultimate 1000x).\n"
+                    "👋 Привет! Я **Чат-менеджер Prince Russia**.\n"
                     "👑 Создатель беседы автоматически получает максимальный 8 ранг («Владелец чата»).\n"
                     "Напишите `/menu` или нажмите кнопку ниже для вызова панели управления!",
                     keyboard=kb.get_json()
@@ -247,7 +333,7 @@ async def chat_handler(message: Message):
 
     uid = str(message.from_id)
 
-    # Проверка мута (удаление сообщений на лету)
+    # Проверка мута
     if uid in chat_data.get("mutes", {}):
         expire_time = chat_data["mutes"][uid]
         if time.time() < expire_time:
@@ -274,7 +360,7 @@ async def chat_handler(message: Message):
             if len(parts) > 1:
                 clean_text = parts[1].strip()
 
-    # --- ИНТЕРАКТИВНЫЕ КНОПКИ (ТЕКСТОВЫЕ КОМАНДЫ ДЛЯ МЕНЮ) ---
+    # --- КНОПКИ В ЧАТЕ (/menu) ---
     if clean_text in ["📋 меню", "меню", "/menu"]:
         kb = Keyboard(one_time=False, inline=True)
         kb.add(Text("🌐 Сайт"), color=KeyboardButtonColor.POSITIVE)
@@ -374,7 +460,7 @@ async def chat_handler(message: Message):
         
         target_id, _ = await resolve_target(message, params)
         if not target_id:
-            return await message.answer("❌ Ответьте на сообщение пользователя или укажите его ID/юз для выдачи доступа к рассылке!")
+            return await message.answer("❌ Ответьте на сообщение пользователя или укажите его ID для выдачи доступа к рассылке!\nПример: `/addowner 123456789`")
             
         if target_id not in db["broadcast_admins"]:
             db["broadcast_admins"].append(target_id)
@@ -390,7 +476,7 @@ async def chat_handler(message: Message):
             
         target_id, _ = await resolve_target(message, params)
         if not target_id:
-            return await message.answer("❌ Укажите пользователя для снятия доступа!")
+            return await message.answer("❌ Укажите ID пользователя для снятия доступа!\nПример: `/removeowner 123456789`")
             
         if target_id == MAIN_OWNER_ID:
             return await message.answer("❌ Нельзя забрать доступ у главного владельца!")
