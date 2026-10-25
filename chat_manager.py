@@ -74,13 +74,14 @@ def get_chat_data(peer_id):
     return db["chats"][p_str]
 
 async def resolve_target(message: Message, args: list):
-    """Ищет ID пользователя по ответу, юзернейму или ID"""
+    """Ищет ID пользователя по ответу, ссылке, юзернейму или ID"""
     if message.reply_message:
         return message.reply_message.from_id
     if not args:
         return None
     
-    identifier = args[0].strip().replace("@", "").replace("vk.com/", "").replace("id", "")
+    # Очищаем аргумент от лишнего мусора (ссылок, собачек, id)
+    identifier = args[0].strip().replace("https://vk.com/", "").replace("vk.com/", "").replace("@", "").replace("id", "")
     if identifier.isdigit():
         return int(identifier)
         
@@ -94,7 +95,7 @@ async def resolve_target(message: Message, args: list):
 
 
 # =====================================================================
-# 3. ПАНЕЛЬ ВЛАДЕЛЬЦА В ЛИЧНЫХ СООБЩЕНИЯХ (МОМЕНТАЛЬНАЯ РАССЫЛКА)
+# 3. ПАНЕЛЬ ВЛАДЕЛЬЦА В ЛИЧНЫХ СООБЩЕНИЯХ (РАССЫЛКА)
 # =====================================================================
 
 @bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
@@ -223,11 +224,11 @@ async def chat_handler(message: Message):
     elif cmd in ["сайт", "🌐 сайт", "ссылки"]:
         await message.answer("🌐 Официальный сайт Prince Russia (скачать игру + бонус 25кк + 1000 BC): https://site-prince-russia.samp.date/")
 
-    # --- ВЫДАЧА РОЛИ (rnick или /role) ---
+    # --- ВЫДАЧА РОЛИ (rnick) ---
     elif cmd in ["rnick", "/role", "роль"]:
         target_id = await resolve_target(message, params)
         if not target_id:
-            return await message.answer("❌ Укажите пользователя (@юзернейм, ID или ответьте на его сообщение)!")
+            return await message.answer("❌ Укажите пользователя (@юзернейм, ID, ссылку или ответьте на его сообщение)!")
         
         role_lvl = None
         for p in params:
@@ -236,16 +237,16 @@ async def chat_handler(message: Message):
                 break
                 
         if not role_lvl:
-            return await message.answer("❌ Укажите уровень роли от 1 до 8 (например: `rnick @durov 5`)!")
+            return await message.answer("❌ Укажите уровень роли от 1 до 8 (например: `rnick @durov 5` или `rnick [ответ на сообщение] 5`)!")
             
         if str(target_id) not in chat_data["members"]:
             chat_data["members"][str(target_id)] = {"level": role_lvl, "nickname": ""}
         else:
-            chat_data["members"][str(target_id)]["level"] = role_lvl
+            chat_data["members"][str(target_id]]["level"] = role_lvl
         save_db(db)
         
         r_name = chat_data["role_names"].get(str(role_lvl), f"Ранг {role_lvl}")
-        await message.answer(f"✅ Пользователю успешно присвоена роль: **{r_name}** `[{role_lvl} lvl]`")
+        await message.answer(f"✅ Пользователю [id{target_id}|успешно] присвоена роль: **{r_name}** `[{role_lvl} lvl]`")
 
     elif cmd in ["/unrole", "снять роль"]:
         target_id = await resolve_target(message, params)
@@ -255,23 +256,24 @@ async def chat_handler(message: Message):
         if str(target_id) in chat_data["members"]:
             chat_data["members"][str(target_id)]["level"] = 0
             save_db(db)
-            await message.answer(f"✅ Роль с пользователя снята.")
+            await message.answer(f"✅ Роль с пользователя [id{target_id}|успешно] снята.")
         else:
             await message.answer("❌ У этого пользователя нет роли в данном чате.")
 
-    # --- УСТАНОВКА НИКА (snick или /setname) ---
+    # --- УСТАНОВКА НИКА (snick) ---
     elif cmd in ["snick", "/setname", "ник"]:
         target_id = await resolve_target(message, params)
         if not target_id:
             return await message.answer("❌ Укажите пользователя!")
             
-        name_parts = [p for p in params if not p.replace("@","").isdigit()]
-        if not name_parts and not message.reply_message:
-            return await message.answer("❌ Введите новый ник/префикс (например: `snick [Куратор]`)!")
+        # Если отвечали на сообщение, то все параметры — это ник. Если нет, то пропускаем первый аргумент (юз/айди)
+        if message.reply_message:
+            new_nick = " ".join(params)
+        else:
+            new_nick = " ".join(params[1:]) if len(params) > 1 else ""
             
-        new_nick = " ".join(name_parts) if message.reply_message else " ".join(params[1:])
         if not new_nick:
-            return await message.answer("❌ Введите текст ника!")
+            return await message.answer("❌ Введите текст ника/префикса (например: `snick [Куратор]` в ответ на сообщение)!")
 
         if str(target_id) not in chat_data["members"]:
             chat_data["members"][str(target_id)] = {"level": 0, "nickname": new_nick}
@@ -279,7 +281,7 @@ async def chat_handler(message: Message):
             chat_data["members"][str(target_id)]["nickname"] = new_nick
         save_db(db)
         
-        await message.answer(f"✅ Установлен ник/префикс: **{new_nick}**")
+        await message.answer(f"✅ Пользователю [id{target_id}|установлен] ник/префикс: **{new_nick}**")
 
     # --- ПЕРЕИМЕНОВАНИЕ РАНГОВ ---
     elif cmd in ["/setrolename"]:
@@ -294,7 +296,7 @@ async def chat_handler(message: Message):
         save_db(db)
         await message.answer(f"✅ Название роли **{lvl_str} уровня** изменено на: *{new_role_name}*")
 
-    # --- СПИСОК НИКОВ (nlist, лист ников, состав) ---
+    # --- СПИСОК НИКОВ (nlist) ---
     elif cmd in ["nlist", "лист ников", "состав", "роли"]:
         members = chat_data.get("members", {})
         if not members:
@@ -319,7 +321,7 @@ async def chat_handler(message: Message):
             
         await message.answer(msg)
 
-    # --- МОДЕРАЦИЯ (бан, разбан, кик, закреп) ---
+    # --- МОДЕРАЦИЯ ---
     elif cmd in ["бан", "/ban"]:
         target_id = await resolve_target(message, params)
         if not target_id:
@@ -351,7 +353,7 @@ async def chat_handler(message: Message):
         if str(target_id) in chat_data["bans"]:
             del chat_data["bans"][str(target_id)]
             save_db(db)
-            await message.answer(f"🟢 Пользователь разбанен в чате.")
+            await message.answer(f"🟢 Пользователь [id{target_id}|разбанен].")
         else:
             await message.answer("❌ Его нет в бан-листе этого чата.")
 
@@ -363,7 +365,7 @@ async def chat_handler(message: Message):
             return await message.answer("❌ Пользователь не найден!")
         try:
             await bot.api.messages.remove_chat_user(chat_id=message.chat_id, user_id=target_id)
-            await message.answer("✅ Нарушитель кикнут из беседы.")
+            await message.answer(f"✅ Пользователь [id{target_id}|кикнут] из беседы.")
         except Exception as e:
             await message.answer(f"❌ Ошибка (проверьте права админа у бота): {e}")
 
@@ -385,5 +387,5 @@ async def chat_handler(message: Message):
 
 
 if __name__ == "__main__":
-    print("🚀 Локальный Чат-Менеджер Prince Russia v3.0 запущен!")
+    print("🚀 Локальный Чат-Менеджер Prince Russia запущен и полностью готов!")
     bot.run_forever()
