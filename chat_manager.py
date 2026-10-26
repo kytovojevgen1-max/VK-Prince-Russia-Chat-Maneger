@@ -114,7 +114,7 @@ def get_user_level(message: Message, chat_data: dict, chat_owner_id: int) -> int
     if chat_owner_id and uid == chat_owner_id:
         return 100
     if str(uid) in db["global_roles"]:
-        return db["global_roles"][str(uid)]
+        return int(db["global_roles"][str(uid)])
     
     m_info = chat_data["members"].get(str(uid), {"level": 0})
     if isinstance(m_info, dict):
@@ -269,15 +269,12 @@ async def chat_handler(message: Message):
     chat_data = get_chat_data(peer_id)
     chat_owner_id = await get_chat_owner_id(peer_id)
 
+    # АВТОМАТИЧЕСКИ ВЫДАЕМ 100 УРОВЕНЬ ВЛАДЕЛЬЦУ ЧАТА
     if chat_owner_id:
         o_str = str(chat_owner_id)
-        if o_str not in chat_data["members"]:
-            chat_data["members"][o_str] = {"level": 100, "nickname": "[Создатель]"}
-        else:
-            if isinstance(chat_data["members"][o_str], dict):
-                chat_data["members"][o_str]["level"] = 100
-            else:
-                chat_data["members"][o_str] = {"level": 100, "nickname": ""}
+        current_data = chat_data["members"].get(o_str, {"nickname": "[Создатель]"})
+        nick = current_data.get("nickname", "[Создатель]") if isinstance(current_data, dict) else "[Создатель]"
+        chat_data["members"][o_str] = {"level": 100, "nickname": nick}
         save_db(db)
 
     if message.action and message.action.type == "chat_invite_user":
@@ -306,7 +303,6 @@ async def chat_handler(message: Message):
     text = message.text
     if not text: return
     
-    # Сохраняем исходный текст для команд с чувствительным регистром (например, кастомный ник)
     raw_text = text.strip()
     clean_text = raw_text.lower()
 
@@ -418,23 +414,17 @@ async def chat_handler(message: Message):
             f"• Аптайм: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Активных чатов: `{chats_count}`\n"
             f"• База данных: `ONLINE (JSON)`\n"
-            f"• Ядро: `v5.5 Ultimate`"
+            f"• Ядро: `v6.0 Ultimate`"
         )
 
     elif cmd == "setnick":
         if user_lvl < 60: return await message.answer(f"❌ Требуется 60+ уровень (у вас: {user_lvl}).")
-        
-        # Получаем цель и оригинальные аргументы для точного сохранения регистра никнейма
-        # Пересобираем параметры из оригинального текста после команды
         orig_parts = raw_text.split()[1:]
         if not orig_parts: return await message.answer("❌ Формат: `/setnick [ответ/id] [Ник/Звание]`")
         
-        # Проверяем есть ли реплай или первый аргумент - это ID
         target_id, remaining = await resolve_target(message, orig_parts)
         if not target_id: return await message.answer("❌ Укажите пользователя.")
         
-        # Если реплая не было, первый аргумент уйдет в target_id, а ник останется в remaining
-        # Если реплай был, все orig_parts — это ник
         if message.reply_message:
             new_nick = " ".join(orig_parts)
         else:
