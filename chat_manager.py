@@ -10,10 +10,14 @@ from vkbottle import Keyboard, KeyboardButtonColor, Text
 # 1. ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ 24/7 (RENDER)
 # =====================================================================
 app = Flask(__name__)
+START_TIME = time.time()
 
 @app.route('/')
 def home():
-    return "Prince Russia Core Server: ONLINE 24/7"
+    uptime_sec = int(time.time() - START_TIME)
+    hours, remainder = divmod(uptime_sec, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"Prince Russia Core Server: ONLINE 24/7 | Uptime: {hours}h {minutes}m {seconds}s"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -29,7 +33,6 @@ TOKEN = "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq0
 bot = Bot(token=TOKEN)
 
 MAIN_OWNER_ID = 897082738  # Твой главный VK ID
-
 DB_FILE = "chat_manager_db.json"
 
 DEFAULT_ROLES = {
@@ -339,7 +342,79 @@ async def chat_handler(message: Message):
 
     user_lvl = get_user_level(message, chat_data, chat_owner_id)
 
-    if cmd == "mute":
+    # --- ПИНГ И СТАТУС ---
+    if cmd == "ping":
+        start_t = time.time()
+        msg_test = await message.answer("🏓 Проверка пинга...")
+        end_t = time.time()
+        ping_ms = int((end_t - start_t) * 1000)
+        status_emoji = "🟢 Отлично" if ping_ms < 600 else "🟡 Нормально" if ping_ms < 1200 else "🔴 Высокий"
+        return await message.edit(message_id=msg_test.conversation_message_id, message=f"🏓 **PONG!**\n• Задержка API VK: `{ping_ms} ms`\n• Соединение: {status_emoji}")
+
+    elif cmd == "status":
+        uptime_sec = int(time.time() - START_TIME)
+        hours, remainder = divmod(uptime_sec, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        chats_count = len(db.get("global_chats", []))
+        return await message.answer(
+            f"⚡ **СТАТУС СЕРВЕРА PRINCE RUSSIA**\n"
+            f"• Аптайм: `{hours}ч {minutes}м {seconds}с`\n"
+            f"• Активных чатов: `{chats_count}`\n"
+            f"• База данных: `ONLINE (JSON)`\n"
+            f"• Ядро: `v4.0 Ultimate`"
+        )
+
+    # --- УПРАВЛЕНИЕ НИКНЕЙМАМИ / ЗВАНИЯМИ ---
+    elif cmd == "setnick":
+        if user_lvl < 60: return await message.answer("❌ Требуется 60+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid or not rem: return await message.answer("❌ Формат: `/setnick [ответ/id] [Ник/Звание]`")
+        new_nick = " ".join(rem)
+        t_str = str(tid)
+        if t_str not in chat_data["members"]:
+            chat_data["members"][t_str] = {"level": 0, "nickname": new_nick}
+        else:
+            if isinstance(chat_data["members"][t_str], dict):
+                chat_data["members"][t_str]["nickname"] = new_nick
+            else:
+                old_lvl = chat_data["members"][t_str]
+                chat_data["members"][t_str] = {"level": old_lvl, "nickname": new_nick}
+        save_db(db)
+        return await message.answer(f"✅ Пользователю [id{tid}|установлен ник]: *{new_nick}*")
+
+    elif cmd == "delnick":
+        if user_lvl < 60: return await message.answer("❌ Требуется 60+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите пользователя.")
+        t_str = str(tid)
+        if t_str in chat_data["members"] and isinstance(chat_data["members"][t_str], dict):
+            chat_data["members"][t_str]["nickname"] = ""
+            save_db(db)
+            return await message.answer(f"🟢 С [id{tid}|пользователя] снят кастомный ник.")
+        return await message.answer("❌ Ник не найден.")
+
+    # --- СТАТИСТИКА И ПРОФИЛЬ ---
+    elif cmd in ["stats", "стата", "профиль"]:
+        tid, _ = await resolve_target(message, params)
+        if not tid: tid = message.from_id
+        t_str = str(tid)
+        lvl = get_user_level(message, chat_data, chat_owner_id)
+        all_r = {**db["global_role_names"], **chat_data["role_names"]}
+        r_name = all_r.get(lvl, "Игрок")
+        
+        m_info = chat_data["members"].get(t_str, {})
+        nick = m_info.get("nickname", "Не установлен") if isinstance(m_info, dict) else "Не установлен"
+        warns = len(chat_data.get("warns", {}).get(t_str, []))
+        
+        return await message.answer(
+            f"📊 **ПРОФИЛЬ ИГРОКА** [id{tid}|Ссылка]:\n"
+            f"• Кастомный ник: `{nick}`\n"
+            f"• Должность: **{r_name}** `[{lvl} lvl]`\n"
+            f"• Предупреждения: `{warns}/3`"
+        )
+
+    # --- МОДЕРАЦИЯ И ОСТАЛЬНЫЕ КОМАНДЫ ---
+    elif cmd == "mute":
         if user_lvl < 45: return await message.answer("❌ Недостаточно прав (нужен 45+).")
         tid, rem = await resolve_target(message, params)
         if not tid: return await message.answer("❌ Укажите цель.")
@@ -396,15 +471,6 @@ async def chat_handler(message: Message):
         status = "Забанен 🔴" if is_b else "Чист 🟢"
         return await message.answer(f"🔍 Статус бана [id{tid}|пользователя]: {status}")
 
-    elif cmd in ["stats", "стата"]:
-        tid, _ = await resolve_target(message, params)
-        if not tid: tid = message.from_id
-        lvl = get_user_level(message, chat_data, chat_owner_id)
-        all_r = {**db["global_role_names"], **chat_data["role_names"]}
-        r_name = all_r.get(lvl, "Игрок")
-        warns = len(chat_data.get("warns", {}).get(str(tid), []))
-        return await message.answer(f"📊 СТАТИСТИКА [id{tid}|Профиль]:\n• Должность: {r_name} [{lvl} lvl]\n• Варнов: {warns}/3")
-
     elif cmd == "statschat":
         c_count = len(db.get("global_chats", []))
         m_count = len(chat_data.get("members", {}))
@@ -449,24 +515,10 @@ async def chat_handler(message: Message):
             return await message.answer(f"🟢 Снят варн с [id{tid}|пользователя].")
         return await message.answer("❌ Нет активных варнов.")
 
-    elif cmd == "vig":
-        if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
-        tid, rem = await resolve_target(message, params)
-        if not tid: return await message.answer("❌ Укажите цель.")
-        return await message.answer(f"⚠️ Администратору [id{tid}|выдан выговор]. Причина: {' '.join(rem) if rem else 'Не указана'}")
-
-    elif cmd == "unvig":
-        if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
-        tid, _ = await resolve_target(message, params)
-        if tid: return await message.answer(f"🟢 С администратора [id{tid}|снят выговор].")
-
     elif cmd == "logs":
         if user_lvl < 70: return await message.answer("❌ Доступно с 70 уровня.")
         recent = "\n".join(db["logs"][-15:])
         return await message.answer(f"📜 ПОСЛЕДНИЕ ЛОГИ:\n{recent if recent else 'Пусто'}")
-
-    elif cmd == "welcome":
-        return await message.answer("👋 Добро пожаловать в беседу проекта Prince Russia!")
 
     elif cmd == "pin":
         if user_lvl < 45: return await message.answer("❌ Нужны права администратора.")
@@ -476,12 +528,6 @@ async def chat_handler(message: Message):
             return await message.answer("📌 Закреплено!")
         except Exception as e:
             return await message.answer(f"❌ Ошибка: {e}")
-
-    elif cmd == "повышение":
-        return await message.answer("📈 Для повышения подайте отчет на форуме или обратитесь к руководству.")
-
-    elif cmd == "понижение":
-        return await message.answer("📉 Понижение выдается за нарушение регламента.")
 
     elif cmd == "newrole":
         if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
@@ -512,7 +558,8 @@ async def chat_handler(message: Message):
             if p.isdigit():
                 lvl_val = int(p)
                 break
-        chat_data["members"][str(tid)] = {"level": lvl_val, "nickname": chat_data["members"].get(str(tid), {}).get("nickname", "")}
+        current_nick = chat_data["members"].get(str(tid), {}).get("nickname", "") if isinstance(chat_data["members"].get(str(tid)), dict) else ""
+        chat_data["members"][str(tid)] = {"level": lvl_val, "nickname": current_nick}
         save_db(db)
         add_log(f"Выдача роли {lvl_val} для ID {tid} от ID {message.from_id}")
         return await message.answer(f"✅ Пользователю [id{tid}|успешно] установлена роль уровня {lvl_val}.")
@@ -521,7 +568,8 @@ async def chat_handler(message: Message):
         if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
         tid, _ = await resolve_target(message, params)
         if not tid: return await message.answer("❌ Укажите пользователя.")
-        chat_data["members"][str(tid)] = {"level": 0, "nickname": ""}
+        current_nick = chat_data["members"].get(str(tid), {}).get("nickname", "") if isinstance(chat_data["members"].get(str(tid)), dict) else ""
+        chat_data["members"][str(tid)] = {"level": 0, "nickname": current_nick}
         save_db(db)
         return await message.answer(f"🟢 С [id{tid}|пользователя] сняты роли (0 уровень).")
 
@@ -542,23 +590,6 @@ async def chat_handler(message: Message):
             return await message.answer(f"🟢 Глобальная роль снята с [id{tid}|пользователя].")
         return await message.answer("❌ У игрока нет глобальной роли.")
 
-    elif cmd in ["gnewrole", "gрнав"]:
-        if user_lvl < 100: return await message.answer("❌ Только для Основателя (100).")
-        if len(params) < 2: return await message.answer("❌ Формат: `/gnewrole [ур] [Название]`")
-        db["global_role_names"][int(params[0])] = " ".join(params[1:])
-        save_db(db)
-        return await message.answer("🌐 Глобальная роль успешно создана.")
-
-    elif cmd == "gdelrole":
-        if user_lvl < 100: return await message.answer("❌ Только для Основателя.")
-        if params and params[0].isdigit():
-            lvl_i = int(params[0])
-            if lvl_i in db["global_role_names"]:
-                del db["global_role_names"][lvl_i]
-                save_db(db)
-                return await message.answer("🌐 Глобальная роль удалена.")
-        return await message.answer("❌ Ошибка.")
-
     elif cmd == "gban":
         if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
         tid, rem = await resolve_target(message, params)
@@ -568,24 +599,6 @@ async def chat_handler(message: Message):
         save_db(db)
         add_log(f"Глобальный бан: ID {tid}, причина: {reason}")
         return await message.answer(f"⛔ ГЛОБАЛЬНЫЙ БАН для [id{tid}|игрока]! Причина: {reason}")
-
-    elif cmd == "gkick":
-        if user_lvl < 70: return await message.answer("❌ Недостаточно прав.")
-        tid, _ = await resolve_target(message, params)
-        if tid:
-            try:
-                await bot.api.messages.remove_chat_user(chat_id=message.chat_id, user_id=tid)
-                return await message.answer("✅ Изгнан.")
-            except Exception:
-                pass
-
-    elif cmd == "gwarn":
-        if user_lvl < 70: return await message.answer("❌ Недостаточно прав.")
-        tid, _ = await resolve_target(message, params)
-        if tid: return await message.answer(f"⚠️ [id{tid}|Игроку] выдан глобальный варн.")
-
-    elif cmd == "bonus":
-        return await message.answer("🎁 Бонус Prince Russia: скачайте игру на сайте и получите 25 000 000$ + 1000 BC!")
 
     elif cmd == "admins":
         a_msg = "👑 АДМИНИСТРАЦИЯ В ЧАТЕ:\n"
@@ -633,7 +646,8 @@ async def chat_handler(message: Message):
         tid, rem = await resolve_target(message, params)
         if not tid or not rem or not rem[0].isdigit(): return await message.answer("❌ Формат: `/setadmin [ID] [ур]`")
         lvl_v = int(rem[0])
-        chat_data["members"][str(tid)] = {"level": lvl_v, "nickname": ""}
+        current_nick = chat_data["members"].get(str(tid), {}).get("nickname", "") if isinstance(chat_data["members"].get(str(tid)), dict) else ""
+        chat_data["members"][str(tid)] = {"level": lvl_v, "nickname": current_nick}
         save_db(db)
         return await message.answer(f"✅ [id{tid}|Пользователю] выданы права администратора уровня {lvl_v}.")
 
