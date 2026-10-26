@@ -2,24 +2,21 @@ import os
 import json
 import time
 import logging
+import asyncio
 from threading import Thread
 from flask import Flask
 from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-# =====================================================================
-# НАСТРОЙКА ЛОГИРОВАНИЯ
-# =====================================================================
+# Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# =====================================================================
-# 1. ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ 24/7 (RENDER / FLASK)
-# =====================================================================
+# Flask-сервер для удержания 24/7 (для Render/Koyeb)
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Prince Russia Core Server: ONLINE 24/7", 200
+    return "Prince Russia Bot: ONLINE 24/7", 200
 
 @app.route('/health')
 def health():
@@ -29,16 +26,13 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# Запуск Flask в отдельном потоке
 Thread(target=run_flask, daemon=True).start()
 
-# =====================================================================
-# 2. КОНФИГУРАЦИЯ И БАЗА ДАННЫХ
-# =====================================================================
+# Конфигурация ВК бота
 TOKEN = os.environ.get("VK_TOKEN", "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq03EeLvxI2gZwJSVvuWMv0eP7vv59FFJvPNYWpRI7R2nzXM0gbobnLpmRaI3yM751Cml4ZOPDcIc380c3hekN0jgZ3QeP76p9hn1Sw6kwK6mOCyomwB33nVy1uBGAbC0mDQpu5eiq2HlVDAKi4YjHYw")
 bot = Bot(token=TOKEN)
 
-MAIN_OWNER_ID = 897082738  # Главный VK ID владельца
+MAIN_OWNER_ID = 897082738  # Главный ID владельца
 
 DB_FILE = "chat_manager_db.json"
 
@@ -62,7 +56,7 @@ def load_db():
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logging.error(f"Ошибка чтения БД, создаю новую: {e}")
+            logging.error(f"Ошибка чтения БД: {e}")
             return {}
     return {}
 
@@ -159,10 +153,7 @@ async def resolve_target(message: Message, args: list):
     return target_id, remaining_args
 
 
-# =====================================================================
-# 3. ЛИЧНЫЕ СООБЩЕНИЯ (ПАНЕЛЬ УПРАВЛЕНИЯ В ЛС)
-# =====================================================================
-
+# === ОБРАБОТЧИКИ ЛИЧНЫХ СООБЩЕНИЙ ===
 @bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
 async def private_start(message: Message):
     uid = message.from_id
@@ -268,10 +259,7 @@ async def private_handler(message: Message):
     await message.answer("❌ Воспользуйтесь кнопками меню или отправьте команду.")
 
 
-# =====================================================================
-# 4. ОБРАБОТКА КОМАНД И МОДЕРАЦИИ В БЕСЕДАХ
-# =====================================================================
-
+# === ОБРАБОТЧИКИ КОМАНД В БЕСЕДАХ ===
 @bot.on.chat_message()
 async def chat_handler(message: Message):
     peer_id = message.peer_id
@@ -291,7 +279,7 @@ async def chat_handler(message: Message):
             chat_data["members"][o_str]["level"] = 100
         save_db(db)
 
-    # Проверка выданных банов при входе нового участника
+    # Проверка бана при входе
     if message.action and message.action.type in ["chat_invite_user", "chat_invite_user_by_link"]:
         j_id = message.action.member_id if message.action.member_id else message.from_id
         if str(j_id) in db["global_bans"] or str(j_id) in chat_data.get("bans", {}):
@@ -304,7 +292,7 @@ async def chat_handler(message: Message):
 
     uid = str(message.from_id)
 
-    # Проверка на наличие мута
+    # Авто-удаление сообщений при муте
     if uid in chat_data.get("mutes", {}):
         if time.time() < chat_data["mutes"][uid]:
             try:
@@ -320,7 +308,7 @@ async def chat_handler(message: Message):
     if not text: return
     clean_text = text.lower().strip()
 
-    # Очистка обращения к боту через упоминание
+    # Очистка от упоминаний бота
     for mention in [f"[club{message.group_id}|@", "@club", "@public"]:
         if mention in clean_text:
             parts = clean_text.split(" ", 1)
@@ -355,8 +343,7 @@ async def chat_handler(message: Message):
 
     user_lvl = get_user_level(message, chat_data, chat_owner_id)
 
-    # --- СИСТЕМА МОДЕРАЦИИ И КОМАНД ---
-
+    # 1. Мут / Размут
     if cmd == "mute":
         if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
         tid, rem = await resolve_target(message, params)
@@ -376,6 +363,7 @@ async def chat_handler(message: Message):
             return await message.answer(f"🔊 С [id{tid}|пользователя] снят мут.")
         return await message.answer("❌ Активный мут не найден.")
 
+    # 2. Бан / Разбан
     elif cmd == "ban":
         if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
         tid, rem = await resolve_target(message, params)
@@ -414,6 +402,7 @@ async def chat_handler(message: Message):
         status = "Забанен 🔴" if is_b else "Чист 🟢"
         return await message.answer(f"🔍 Статус блокировки [id{tid}|пользователя]: {status}")
 
+    # 3. Статистика / Профиль
     elif cmd in ["stats", "стата"]:
         tid, _ = await resolve_target(message, params)
         if not tid: tid = message.from_id
@@ -428,6 +417,7 @@ async def chat_handler(message: Message):
         m_count = len(chat_data.get("members", {}))
         return await message.answer(f"📈 **СТАТИСТИКА БЕСЕДЫ:**\n• Сохранённых участников: `{m_count}`\n• Всего подключённых чатов: `{c_count}`")
 
+    # 4. Кик / Варны
     elif cmd == "kick":
         if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
         tid, _ = await resolve_target(message, params)
@@ -467,6 +457,7 @@ async def chat_handler(message: Message):
             return await message.answer(f"🟢 Предупреждение снято с [id{tid}|пользователя].")
         return await message.answer("❌ Предупреждения отсутствуют.")
 
+    # 5. Выговоры
     elif cmd == "vig":
         if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
         tid, rem = await resolve_target(message, params)
@@ -478,23 +469,7 @@ async def chat_handler(message: Message):
         tid, _ = await resolve_target(message, params)
         if tid: return await message.answer(f"🟢 С администратора [id{tid}|снят выговор].")
 
-    elif cmd == "logs":
-        if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
-        recent = "\n".join(db["logs"][-15:])
-        return await message.answer(f"📜 **ПОСЛЕДНИЕ СОБЫТИЯ:**\n{recent if recent else 'Записи отсутствуют'}")
-
-    elif cmd == "welcome":
-        return await message.answer("👋 Приветствуем в официальной беседе проекта Prince Russia!")
-
-    elif cmd == "pin":
-        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
-        if not message.reply_message: return await message.answer("❌ Сделайте ответ на закрепляемое сообщение.")
-        try:
-            await bot.api.messages.pin(peer_id=peer_id, conversation_message_id=message.reply_message.conversation_message_id)
-            return await message.answer("📌 Сообщение зафиксировано.")
-        except Exception as e:
-            return await message.answer(f"❌ Ошибка закрепления: {e}")
-
+    # 6. Управление ролями и правами
     elif cmd == "newrole":
         if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
         if len(params) < 2: return await message.answer("❌ Формат: `/newrole [уровень] [Название]`")
@@ -503,7 +478,7 @@ async def chat_handler(message: Message):
         r_name = " ".join(params[1:])
         chat_data["role_names"][int(lvl_s)] = r_name
         save_db(db)
-        return await message.answer(f"✅ Назначена роль локального уровня `{lvl_s}` ➔ *{r_name}*")
+        return await message.answer(f"✅ Назначена роль уровня `{lvl_s}` ➔ *{r_name}*")
 
     elif cmd == "delrole":
         if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
@@ -513,7 +488,7 @@ async def chat_handler(message: Message):
             del chat_data["role_names"][lvl_i]
             save_db(db)
             return await message.answer(f"🗑 Локальная роль `{lvl_i}` удалена.")
-        return await message.answer("❌ Роль с таким уровнем не найдена.")
+        return await message.answer("❌ Роль не найдена.")
 
     elif cmd in ["выдатьроль", "роль"]:
         if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
@@ -526,7 +501,7 @@ async def chat_handler(message: Message):
                 break
         chat_data["members"][str(tid)] = {"level": lvl_val, "nickname": chat_data["members"].get(str(tid), {}).get("nickname", "")}
         save_db(db)
-        add_log(f"Назначена роль уровня {lvl_val} для ID {tid} пользователем ID {message.from_id}")
+        add_log(f"Назначена роль {lvl_val} для ID {tid}")
         return await message.answer(f"✅ Пользователю [id{tid}|установлен] уровень прав `{lvl_val}`.")
 
     elif cmd in ["removerole", "снятьроль"]:
@@ -535,15 +510,16 @@ async def chat_handler(message: Message):
         if not tid: return await message.answer("❌ Укажите пользователя.")
         chat_data["members"][str(tid)] = {"level": 0, "nickname": ""}
         save_db(db)
-        return await message.answer(f"🟢 С [id{tid}|пользователя] сброшены все локальные роли.")
+        return await message.answer(f"🟢 С [id{tid}|пользователя] сброшены роли.")
 
+    # 7. Глобальное управление
     elif cmd == "grole":
         if user_lvl < 95: return await message.answer("❌ Требуется 95+ уровень.")
         tid, rem = await resolve_target(message, params)
-        if not tid or not rem or not rem[0].isdigit(): return await message.answer("❌ Формат: `/grole [ID/упоминание] [уровень]`")
+        if not tid or not rem or not rem[0].isdigit(): return await message.answer("❌ Формат: `/grole [ID] [уровень]`")
         db["global_roles"][str(tid)] = int(rem[0])
         save_db(db)
-        return await message.answer(f"🌐 Глобальная роль `{rem[0]}` успешно присвоена [id{tid}|пользователю].")
+        return await message.answer(f"🌐 Глобальная роль `{rem[0]}` присвоена [id{tid}|пользователю].")
 
     elif cmd == "grr":
         if user_lvl < 95: return await message.answer("❌ Требуется 95+ уровень.")
@@ -552,14 +528,7 @@ async def chat_handler(message: Message):
             del db["global_roles"][str(tid)]
             save_db(db)
             return await message.answer(f"🟢 Глобальная роль аннулирована у [id{tid}|пользователя].")
-        return await message.answer("❌ Отсутствует глобальная роль.")
-
-    elif cmd in ["gnewrole", "gрнав"]:
-        if user_lvl < 100: return await message.answer("❌ Доступно только Должности 100.")
-        if len(params) < 2: return await message.answer("❌ Формат: `/gnewrole [уровень] [Название]`")
-        db["global_role_names"][int(params[0])] = " ".join(params[1:])
-        save_db(db)
-        return await message.answer("🌐 Глобальная роль создана в общей системе.")
+        return await message.answer("❌ Глобальная роль не найдена.")
 
     elif cmd == "gban":
         if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
@@ -571,8 +540,26 @@ async def chat_handler(message: Message):
         add_log(f"Глобальный бан: ID {tid}, причина: {reason}")
         return await message.answer(f"⛔ **ГЛОБАЛЬНАЯ БЛОКИРОВКА** для [id{tid}|пользователя]! Причина: {reason}")
 
+    # 8. Инфо и Сервис
+    elif cmd == "logs":
+        if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
+        recent = "\n".join(db["logs"][-15:])
+        return await message.answer(f"📜 **ПОСЛЕДНИЕ СОБЫТИЯ:**\n{recent if recent else 'Записи отсутствуют'}")
+
+    elif cmd == "welcome":
+        return await message.answer("👋 Приветствуем в беседе проекта Prince Russia!")
+
+    elif cmd == "pin":
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        if not message.reply_message: return await message.answer("❌ Сделайте ответ на сообщение.")
+        try:
+            await bot.api.messages.pin(peer_id=peer_id, conversation_message_id=message.reply_message.conversation_message_id)
+            return await message.answer("📌 Сообщение закрепили.")
+        except Exception as e:
+            return await message.answer(f"❌ Ошибка закрепления: {e}")
+
     elif cmd == "bonus":
-        return await message.answer("🎁 Игровой бонус: Скачайте клиент Prince Russia на сайте и получите 25.000.000$ + 1000 BC!")
+        return await message.answer("🎁 Бонус проекта: Скачайте клиент Prince Russia и получите 25.000.000$ + 1000 BC!")
 
     elif cmd == "admins":
         a_msg = "👑 **СПИСОК АДМИНИСТРАЦИИ В БЕСЕДЕ:**\n"
@@ -583,12 +570,12 @@ async def chat_handler(message: Message):
                 all_r = {**db["global_role_names"], **chat_data["role_names"]}
                 found = True
                 a_msg += f"• [id{int(m_id)}|Администратор] ➔ {all_r.get(lvl, 'Админ')} `[{lvl} lvl]`\n"
-        return await message.answer(a_msg if found else "📋 В беседе нет участников с административным доступом.")
+        return await message.answer(a_msg if found else "📋 В беседе нет админов.")
 
     elif cmd == "leaders":
         p_str = str(peer_id)
         chat_leads = db["leaders"].get(p_str, {})
-        if not chat_leads: return await message.answer("📋 В текущей беседе лидеры не назначены.")
+        if not chat_leads: return await message.answer("📋 Лидеры в этой беседе не назначены.")
         l_msg = "📋 **СПИСОК ЛИДЕРОВ:**\n"
         for l_id, org in chat_leads.items():
             l_msg += f"• [id{int(l_id)}|Лидер] ➔ Организация: `{org}`\n"
@@ -597,7 +584,7 @@ async def chat_handler(message: Message):
     elif cmd == "setleader":
         if user_lvl < 60: return await message.answer("❌ Требуется 60+ уровень.")
         tid, rem = await resolve_target(message, params)
-        if not tid or not rem: return await message.answer("❌ Формат: `/setleader [ответ/id] [Название организации]`")
+        if not tid or not rem: return await message.answer("❌ Формат: `/setleader [ответ/id] [Организация]`")
         org_name = " ".join(rem)
         p_str = str(peer_id)
         if p_str not in db["leaders"]: db["leaders"][p_str] = {}
@@ -615,13 +602,7 @@ async def chat_handler(message: Message):
             return await message.answer(f"🟢 С [id{tid}|пользователя] сняты полномочия лидера.")
         return await message.answer("❌ Пользователь не найден среди лидеров.")
 
-
 if __name__ == "__main__":
     logging.info("🚀 Запуск Prince Russia VK Core Engine...")
     bot.run_forever()
 ```
-
-### Главные улучшения в файле:
-1. **Безопасная запись БД:** Применяется концепция *Atomic Write* (сохранение во временный файл `.tmp` с последующей заменой), что защищает JSON от повреждения при неожиданных перезапусках контейнера Render.
-2. **Маршруты проверки работоспособности (Health-check):** Эндпоинты `/` и `/health` работают с корректными `HTTP 200 OK` ответами для Render Ping-сервисов.
-3. **Логирование:** Простой `print` заменен на стандартный модуль `logging` Python для удобного отслеживания событий прямо в веб-интерфейсе Render Dashboard.
