@@ -342,8 +342,62 @@ async def chat_handler(message: Message):
 
     user_lvl = get_user_level(message, chat_data, chat_owner_id)
 
-    # --- ПИНГ И СТАТУС ---
-    if cmd == "ping":
+    # --- СПРАВКА / HELP ---
+    if cmd in ["help", "хелп"]:
+        help_msg = (
+            "📖 **СПИСОК КОМАНД PRINCE RUSSIA** 📖\n\n"
+            "🌐 **Общие команды:**\n"
+            "• `/stats` (или `/стата`) — ваш профиль или профиль игрока\n"
+            "• `/roles` (или `роли`) — список ролей и иерархия\n"
+            "• `/admins` — список администраторов в чате\n"
+            "• `/leaders` — список лидеров организаций\n"
+            "• `/bonus` — получить бонус проекта\n"
+            "• `/ping` — проверка пинга и задержки API\n"
+            "• `/status` — аптайм и статус сервера\n\n"
+        )
+        if user_lvl >= 45:
+            help_msg += (
+                "🛡 **Модерация (45+ lvl):**\n"
+                "• `/mute [ид/ответ] [минуты]` — выдать мут\n"
+                "• `/unmute [ид/ответ]` — снять мут\n"
+                "• `/kick [ид/ответ]` — кикнуть из беседы\n"
+                "• `/warn [ид/ответ] [причина]` — варн (3 варна = кик)\n"
+                "• `/unwarn [ид/ответ]` — снять варн\n"
+                "• `/pin` — закрепить сообщение (ответом)\n\n"
+            )
+        if user_lvl >= 55:
+            help_msg += (
+                "🚨 **Старшая модерация (55+ lvl):**\n"
+                "• `/ban [ид/ответ] [причина]` — бан в беседе\n"
+                "• `/unban [ид]` — разбан в беседе\n"
+                "• `/banlist` — список забаненных\n\n"
+            )
+        if user_lvl >= 60:
+            help_msg += (
+                "👑 **Руководство / Лидеры (60+ lvl):**\n"
+                "• `/setleader [ид/ответ] [Организация]` — назначить лидера\n"
+                "• `/removeleader [ид/ответ]` — снять лидера\n"
+                "• `/setnick [ид/ответ] [Ник]` — установить кастомный ник\n"
+                "• `/delnick [ид/ответ]` — удалить кастомный ник\n\n"
+            )
+        if user_lvl >= 70:
+            help_msg += (
+                "⚡ **Администрация (70+ lvl):**\n"
+                "• `/setadmin [ид] [уровень]` — выдать админку\n"
+                "• `/выдатьроль [ид] [ур]` — выдать роль\n"
+                "• `/снятьроль [ид]` — снять роль\n"
+                "• `/logs` — просмотр последних логов\n\n"
+            )
+        if user_lvl >= 90:
+            help_msg += (
+                "🔥 **Высшая администрация (90+ lvl):**\n"
+                "• `/gban [ид] [причина]` — глобальный бан\n"
+                "• `/newrole [ур] [Название]` — создать роль в чате\n"
+                "• `/delrole [ур]` — удалить роль\n"
+            )
+        return await message.answer(help_msg)
+
+    elif cmd == "ping":
         start_t = time.time()
         msg_test = await message.answer("🏓 Проверка пинга...")
         end_t = time.time()
@@ -361,10 +415,9 @@ async def chat_handler(message: Message):
             f"• Аптайм: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Активных чатов: `{chats_count}`\n"
             f"• База данных: `ONLINE (JSON)`\n"
-            f"• Ядро: `v4.0 Ultimate`"
+            f"• Ядро: `v4.5 Ultimate`"
         )
 
-    # --- УПРАВЛЕНИЕ НИКНЕЙМАМИ / ЗВАНИЯМИ ---
     elif cmd == "setnick":
         if user_lvl < 60: return await message.answer("❌ Требуется 60+ уровень.")
         tid, rem = await resolve_target(message, params)
@@ -393,7 +446,6 @@ async def chat_handler(message: Message):
             return await message.answer(f"🟢 С [id{tid}|пользователя] снят кастомный ник.")
         return await message.answer("❌ Ник не найден.")
 
-    # --- СТАТИСТИКА И ПРОФИЛЬ ---
     elif cmd in ["stats", "стата", "профиль"]:
         tid, _ = await resolve_target(message, params)
         if not tid: tid = message.from_id
@@ -413,7 +465,6 @@ async def chat_handler(message: Message):
             f"• Предупреждения: `{warns}/3`"
         )
 
-    # --- МОДЕРАЦИЯ И ОСТАЛЬНЫЕ КОМАНДЫ ---
     elif cmd == "mute":
         if user_lvl < 45: return await message.answer("❌ Недостаточно прав (нужен 45+).")
         tid, rem = await resolve_target(message, params)
