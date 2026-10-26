@@ -188,13 +188,13 @@ async def private_view_logs(message: Message):
     if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
     broadcast_logs = [log for log in db["logs"] if "рассылка" in log.lower() or "рассылки" in log.lower()]
     recent = "\n".join(broadcast_logs[-10:]) if broadcast_logs else "📋 Логов рассылок пока нет."
-    await message.answer(f"📜 **ПОСЛЕДНИЕ ЛОГИ РАССЫЛОК:**\n\n{recent}")
+    await message.answer(f"📜 **ПОСЛЕДНИЕ ЛОГИ РАССЫЛОК (С КЛИКАБЕЛЬНЫМИ АДМИНАМИ):**\n\n{recent}")
 
 @bot.on.private_message(text="👥 Список админов рассылки")
 async def private_view_admins(message: Message):
     uid = message.from_id
     if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
-    admins_list = "\n".join([f"• [id{aid}|ID {aid}]" for aid in db["broadcast_admins"]])
+    admins_list = "\n".join([f"• [id{aid}|Перейти к админу ID {aid}]" for aid in db["broadcast_admins"]])
     await message.answer(f"👥 **АДМИНИСТРАТОРЫ РАССЫЛКИ:**\n\n{admins_list}")
 
 @bot.on.private_message(text="📢 Начать рассылку по чатам")
@@ -223,7 +223,7 @@ async def private_handler(message: Message):
             if tid not in db["broadcast_admins"]:
                 db["broadcast_admins"].append(tid)
                 save_db(db)
-                add_log(f"Админ ID {uid} выдал доступ к рассылке для ID {tid}")
+                add_log(f"Админ [id{uid}|ID {uid}] выдал доступ к рассылке для [id{tid}|ID {tid}]")
                 return await message.answer(f"✅ Пользователю [id{tid}|ID {tid}] успешно выдан доступ к рассылке.")
         return await message.answer("❌ Ошибка: Неверный VK ID.")
 
@@ -235,7 +235,7 @@ async def private_handler(message: Message):
             "📢 ВНИМАНИЕ! ОФИЦИАЛЬНОЕ СООБЩЕНИЕ ОТ PRINCE RUSSIA 📢\n\n"
             f"{text}\n\n"
             "────────────────────────\n"
-            f"👤 Запустил рассылку: [id{uid}|Администрация]\n"
+            f"👤 Запустил рассылку (тест/инфо): [id{uid}|Администратор]\n"
             "🌐 Сайт проекта: https://site-prince-russia.samp.date/\n"
             "@all"
         )
@@ -247,7 +247,7 @@ async def private_handler(message: Message):
             except Exception:
                 pass
                 
-        add_log(f"Глобальная рассылка выполнена админом ID {uid}. Успешно отправлено в чатов: {count}")
+        add_log(f"Официальная рассылка [тест/инфо] запущена админом [id{uid}|ID {uid}]. Успешно в чатов: {count}")
         return await message.answer(f"🚀 **Рассылка завершена!**\n• Успешно доставлено в чатов: `{count}`")
 
     await message.answer("❌ Используйте удобные кнопки в меню или команды в беседах.")
@@ -268,7 +268,6 @@ async def chat_handler(message: Message):
     chat_data = get_chat_data(peer_id)
     chat_owner_id = await get_chat_owner_id(peer_id)
 
-    # АВТОМАТИЧЕСКИ ВЫДАЕМ 100 УРОВЕНЬ ВЛАДЕЛЬЦУ ЧАТА
     if chat_owner_id:
         o_str = str(chat_owner_id)
         current_data = chat_data["members"].get(o_str, {"nickname": "[Создатель]"})
@@ -346,6 +345,7 @@ async def chat_handler(message: Message):
             "📖 **СПИСОК КОМАНД PRINCE RUSSIA** 📖\n\n"
             "🌐 **Общие команды:**\n"
             "• `/stats` (или `/стата`) — ваш профиль или профиль игрока\n"
+            "• `/nlist` (или `/нлист`) — список игроков с кастомными никами\n"
             "• `/roles` (или `роли`) — список ролей и иерархия\n"
             "• `/admins` — список администраторов в чате\n"
             "• `/leaders` — список лидеров организаций\n"
@@ -413,8 +413,24 @@ async def chat_handler(message: Message):
             f"• Аптайм: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Активных чатов: `{chats_count}`\n"
             f"• База данных: `ONLINE (JSON)`\n"
-            f"• Ядро: `v6.2 Ultimate Stable`"
+            f"• Ядро: `v7.0 Ultimate NickList`"
         )
+
+    elif cmd in ["nlist", "нлист"]:
+        members = chat_data.get("members", {})
+        nlist_msg = "📋 **СПИСОК ИГРОКОВ С КАСТОМНЫМИ НИКАМИ:**\n\n"
+        found_nicks = False
+        
+        for m_id, info in members.items():
+            if isinstance(info, dict):
+                nick = info.get("nickname", "")
+                if nick and nick.strip():
+                    found_nicks = True
+                    nlist_msg += f"• [id{int(m_id)}|Профиль игрока] ➔ Ник: **{nick}**\n"
+                    
+        if not found_nicks:
+            return await message.answer("📋 В этой беседе пока нет игроков с установленными кастомными никами.")
+        return await message.answer(nlist_msg)
 
     elif cmd == "setnick":
         if user_lvl < 60: return await message.answer(f"❌ Требуется 60+ уровень (у вас: {user_lvl}).")
@@ -469,7 +485,7 @@ async def chat_handler(message: Message):
         warns = len(chat_data.get("warns", {}).get(t_str, []))
         
         return await message.answer(
-            f"📊 **ПРОФИЛЬ ИГРОКА** [id{target_id}|Ссылка]:\n"
+            f"📊 **ПРОФИЛЬ ИГРОКА** [id{target_id}|Кликнуть для перехода]:\n"
             f"• Кастомный ник: `{nick}`\n"
             f"• Должность: **{r_name}** `[{target_lvl} lvl]`\n"
             f"• Предупреждения: `{warns}/3`"
@@ -482,7 +498,7 @@ async def chat_handler(message: Message):
         mins = int(rem[0]) if rem and rem[0].isdigit() else 10
         chat_data["mutes"][str(tid)] = time.time() + (mins * 60)
         save_db(db)
-        add_log(f"Мут: ID {tid} на {mins} мин от ID {message.from_id}")
+        add_log(f"Мут: ID {tid} на {mins} мин от [id{message.from_id}|админа]")
         return await message.answer(f"🤫 Пользователю [id{tid}|выдан мут] на {mins} минут.")
 
     elif cmd in ["unmute", "unmite"]:
@@ -588,7 +604,6 @@ async def chat_handler(message: Message):
             await bot.api.messages.pin(peer_id=peer_id, conversation_message_id=message.reply_message.conversation_message_id)
             return await message.answer("📌 Сообщение успешно закреплено!")
         except Exception as e:
-            # Улучшенный вывод: подсказка, если бот не админ беседы
             return await message.answer(
                 f"❌ **Ошибка закрепления:**\n"
                 f"ВКонтакте запрещает ботам закреплять сообщения, если у бота **нет прав администратора беседы**!\n"
@@ -631,7 +646,7 @@ async def chat_handler(message: Message):
         
         chat_data["members"][t_str] = {"level": lvl_val, "nickname": current_nick}
         save_db(db)
-        add_log(f"Выдача роли {lvl_val} для ID {tid} от ID {message.from_id}")
+        add_log(f"Выдача роли {lvl_val} для [id{tid}|игрока] от [id{message.from_id}|админа]")
         return await message.answer(f"✅ Пользователю [id{tid}|успешно] установлена роль уровня {lvl_val}.")
 
     elif cmd in ["removerole", "снятьроль"]:
@@ -671,7 +686,7 @@ async def chat_handler(message: Message):
         reason = " ".join(rem) if rem else "Нарушение проекта"
         db["global_bans"][str(tid)] = reason
         save_db(db)
-        add_log(f"Глобальный бан: ID {tid}, причина: {reason}")
+        add_log(f"Глобальный бан: [id{tid}|игрок], причина: {reason}")
         return await message.answer(f"⛔ ГЛОБАЛЬНЫЙ БАН для [id{tid}|игрока]! Причина: {reason}")
 
     elif cmd == "admins":
