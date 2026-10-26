@@ -271,6 +271,14 @@ async def chat_handler(message: Message):
     chat_data = get_chat_data(peer_id)
     chat_owner_id = await get_chat_owner_id(peer_id)
 
+    # АВТОМАТИЧЕСКИ ЖЕСТКО ЗАКРЕПЛЯЕМ 100 УРОВЕНЬ ЗА ВЛАДЕЛЬЦЕМ ЧАТА
+    if chat_owner_id:
+        o_str = str(chat_owner_id)
+        current_data = chat_data["members"].get(o_str, {"nickname": "[Создатель]"})
+        nick = current_data.get("nickname", "[Создатель]") if isinstance(current_data, dict) else "[Создатель]"
+        chat_data["members"][o_str] = {"level": 100, "nickname": nick}
+        save_db(db)
+
     if message.action and message.action.type == "chat_invite_user":
         j_id = message.action.member_id
         if str(j_id) in db["global_bans"] or str(j_id) in chat_data.get("bans", {}):
@@ -409,7 +417,7 @@ async def chat_handler(message: Message):
             f"• Аптайм сервера: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Подключено чатов: `{chats_count}`\n"
             f"• База данных: `ONLINE (JSON Secure)`\n"
-            f"• Версия сборки: `v7.5 Ultimate Supreme`"
+            f"• Версия сборки: `v7.6 Owner Auto-100 Fix`"
         )
 
     elif cmd in ["nlist", "нлист"]:
@@ -543,7 +551,7 @@ async def chat_handler(message: Message):
         tid, _ = await resolve_target(message, params)
         if not tid: tid = message.from_id
         is_b = str(tid) in chat_data.get("bans", {}) or str(tid) in db["global_bans"]
-        status = "В бане 🔴" | is_b if False else ("В бане 🔴" if is_b else "Чист 🟢")
+        status = "В бане 🔴" if is_b else "Чист 🟢"
         return await message.answer(f"🔍 Проверка статуса [id{tid}|игрока]: {status}")
 
     elif cmd == "statschat":
