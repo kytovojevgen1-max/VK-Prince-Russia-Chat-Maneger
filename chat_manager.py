@@ -150,7 +150,7 @@ async def resolve_target(message: Message, args: list):
 
 
 # =====================================================================
-# 3. ЛИЧНЫЕ СООБЩЕНИЯ (ПАНЕЛЬ УПРАВЛЕНИЯ В ЛС)
+# 3. ЛИЧНЫЕ СООБЩЕНИЯ (ПАНЕЛЬ УПРАВЛЕНИЯ В ЛС С 4 КНОПКАМИ)
 # =====================================================================
 
 @bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
@@ -164,51 +164,46 @@ async def private_start(message: Message):
     kb.add(Text("🌐 Сайт проекта"), color=KeyboardButtonColor.POSITIVE)
     if has_broadcast:
         kb.row()
-        kb.add(Text("📢 Рассылка"), color=KeyboardButtonColor.NEGATIVE)
-    if is_main:
+        kb.add(Text("➕ Выдать доступ к рассылке"), color=KeyboardButtonColor.POSITIVE)
+        kb.add(Text("📜 Логи рассылок"), color=KeyboardButtonColor.PRIMARY)
         kb.row()
-        kb.add(Text("⚙️ Управление доступами"), color=KeyboardButtonColor.PRIMARY)
+        kb.add(Text("👥 Список админов рассылки"), color=KeyboardButtonColor.PRIMARY)
+        kb.add(Text("📢 Начать рассылку по чатам"), color=KeyboardButtonColor.NEGATIVE)
     
     await message.answer(
-        "👑 PRINCE RUSSIA — ADMIN PANEL 👑\n"
-        "Панель управления проектом и ботом в личных сообщениях.",
+        "👑 PRINCE RUSSIA — ULTIMATE ADMIN PANEL 👑\n"
+        "Выберите нужное действие с помощью кнопок ниже:",
         keyboard=kb.get_json()
     )
 
-@bot.on.private_message(text="⚙️ Управление доступами")
-async def private_access_panel(message: Message):
-    if message.from_id != MAIN_OWNER_ID: return
-    kb = Keyboard(one_time=False, inline=True)
-    kb.add(Text("➕ Выдать доступ"), color=KeyboardButtonColor.POSITIVE)
-    kb.add(Text("➖ Забрать доступ"), color=KeyboardButtonColor.NEGATIVE)
-    kb.row()
-    kb.add(Text("🔙 Главное меню"), color=KeyboardButtonColor.PRIMARY)
-    
-    admins_list = ", ".join([f"[id{aid}|ID {aid}]" for aid in db["broadcast_admins"]])
-    await message.answer(
-        f"⚙️ УПРАВЛЕНИЕ ДОСТУПОМ К РАССЫЛКЕ\n"
-        f"Администраторы рассылки:\n{admins_list}",
-        keyboard=kb.get_json()
-    )
-
-@bot.on.private_message(text="➕ Выдать доступ")
+@bot.on.private_message(text="➕ Выдать доступ к рассылке")
 async def private_add_adm(message: Message):
-    if message.from_id != MAIN_OWNER_ID: return
-    user_states[message.from_id] = "wait_add_adm"
-    await message.answer("✍️ Введите VK ID пользователя:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
+    uid = message.from_id
+    if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
+    user_states[uid] = "wait_add_adm"
+    await message.answer("✍️ Введите VK ID пользователя для выдачи доступа к рассылке:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена",_="cancel"), color=KeyboardButtonColor.NEGATIVE).get_json())
 
-@bot.on.private_message(text="➖ Забрать доступ")
-async def private_rem_adm(message: Message):
-    if message.from_id != MAIN_OWNER_ID: return
-    user_states[message.from_id] = "wait_rem_adm"
-    await message.answer("✍️ Введите VK ID пользователя:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
+@bot.on.private_message(text="📜 Логи рассылок")
+async def private_view_logs(message: Message):
+    uid = message.from_id
+    if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
+    broadcast_logs = [log for log in db["logs"] if "рассылка" in log.lower() or "рассылки" in log.lower()]
+    recent = "\n".join(broadcast_logs[-10:]) if broadcast_logs else "📋 Логов рассылок пока нет."
+    await message.answer(f"📜 **ПОСЛЕДНИЕ ЛОГИ РАССЫЛОК:**\n\n{recent}")
 
-@bot.on.private_message(text="📢 Рассылка")
-async def private_broadcast(message: Message):
+@bot.on.private_message(text="👥 Список админов рассылки")
+async def private_view_admins(message: Message):
+    uid = message.from_id
+    if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
+    admins_list = "\n".join([f"• [id{aid}|ID {aid}]" for aid in db["broadcast_admins"]])
+    await message.answer(f"👥 **АДМИНИСТРАТОРЫ РАССЫЛКИ:**\n\n{admins_list}")
+
+@bot.on.private_message(text="📢 Начать рассылку по чатам")
+async def private_broadcast_start(message: Message):
     uid = message.from_id
     if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
     user_states[uid] = "wait_broadcast"
-    await message.answer("✍️ Введите текст для глобальной рассылки:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
+    await message.answer("✍️ Введите текст для глобальной рассылки по всем беседам:\n*(Сообщение будет отправлено с тегом `@all` от лица официального управления Prince Russia)*", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
 
 @bot.on.private_message(text="🌐 Сайт проекта")
 async def private_site(message: Message):
@@ -221,7 +216,7 @@ async def private_handler(message: Message):
     if not text: return
     state = user_states.get(uid)
 
-    if state == "wait_add_adm" and uid == MAIN_OWNER_ID:
+    if state == "wait_add_adm" and (uid == MAIN_OWNER_ID or uid in db["broadcast_admins"]):
         del user_states[uid]
         clean = text.strip().replace("id", "")
         if clean.isdigit():
@@ -229,33 +224,35 @@ async def private_handler(message: Message):
             if tid not in db["broadcast_admins"]:
                 db["broadcast_admins"].append(tid)
                 save_db(db)
-                return await message.answer(f"✅ Пользователю [id{tid}|ID {tid}] выдан доступ.")
-        return await message.answer("❌ Ошибка ID.")
-
-    if state == "wait_rem_adm" and uid == MAIN_OWNER_ID:
-        del user_states[uid]
-        clean = text.strip().replace("id", "")
-        if clean.isdigit():
-            tid = int(clean)
-            if tid != MAIN_OWNER_ID and tid in db["broadcast_admins"]:
-                db["broadcast_admins"].remove(tid)
-                save_db(db)
-                return await message.answer(f"✅ Доступ забран у [id{tid}|ID {tid}].")
-        return await message.answer("❌ Ошибка ID.")
+                add_log(f"Админ ID {uid} выдал доступ к рассылке для ID {tid}")
+                return await message.answer(f"✅ Пользователю [id{tid}|ID {tid}] успешно выдан доступ к рассылке.")
+        return await message.answer("❌ Ошибка: Неверный VK ID.")
 
     if state == "wait_broadcast" and (uid == MAIN_OWNER_ID or uid in db["broadcast_admins"]):
         del user_states[uid]
         count = 0
+        
+        # Красивое официальное сообщение, которое цепляет всех через @all
+        broadcast_text = (
+            "📢 ВНИМАНИЕ! ОФИЦИАЛЬНОЕ СООБЩЕНИЕ ОТ PRINCE RUSSIA 📢\n\n"
+            f"{text}\n\n"
+            "────────────────────────\n"
+            f"👤 Запустил рассылку: [id{uid}|Администрация]\n"
+            "🌐 Сайт проекта: https://site-prince-russia.samp.date/\n"
+            "@all"
+        )
+        
         for cid in db.get("global_chats", []):
             try:
-                await bot.api.messages.send(peer_id=int(cid), message=f"📢 ГЛОБАЛЬНОЕ СООБЩЕНИЕ:\n\n{text}", random_id=0)
+                await bot.api.messages.send(peer_id=int(cid), message=broadcast_text, random_id=0)
                 count += 1
             except Exception:
                 pass
-        add_log(f"Глобальная рассылка от ID {uid} в {count} чатов.")
-        return await message.answer(f"✅ Успешно отправлено в чатов: {count}")
+                
+        add_log(f"Глобальная рассылка выполнена админом ID {uid}. Успешно отправлено в чатов: {count}")
+        return await message.answer(f"🚀 **Рассылка завершена!**\n• Успешно доставлено в чатов: `{count}`")
 
-    await message.answer("❌ Используйте инлайн-кнопки в ЛС или команды в беседах.")
+    await message.answer("❌ Используйте удобные кнопки в меню или команды в беседах.")
 
 
 # =====================================================================
@@ -415,7 +412,7 @@ async def chat_handler(message: Message):
             f"• Аптайм: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Активных чатов: `{chats_count}`\n"
             f"• База данных: `ONLINE (JSON)`\n"
-            f"• Ядро: `v4.5 Ultimate`"
+            f"• Ядро: `v5.0 Ultimate`"
         )
 
     elif cmd == "setnick":
