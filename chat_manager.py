@@ -1,361 +1,627 @@
-import asyncio
-import io
-import json
-import logging
 import os
-import random
-import sqlite3
+import json
 import time
-import zipfile
-import html
+import logging
+from threading import Thread
+from flask import Flask
+from vkbottle.bot import Bot, Message
+from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-from aiogram import Bot, Dispatcher, F, Router
-from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import (
-    BufferedInputFile,
-    CallbackQuery,
-    FSInputFile,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    KeyboardButton,
-    Message,
-    ReplyKeyboardMarkup,
-)
+# =====================================================================
+# НАСТРОЙКА ЛОГИРОВАНИЯ
+# =====================================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# ====================== CONFIG & CONSTANTS ======================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-ADMIN_ID = 123456789
+# =====================================================================
+# 1. ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ 24/7 (RENDER / FLASK)
+# =====================================================================
+app = Flask(__name__)
 
-BOT_NAME = "BLACK STUDIO"
-SETTINGS_FILE = "settings.json"
-IMG = "images"
-LINE = "----------------------------------------"
+@app.route('/')
+def home():
+    return "Prince Russia Core Server: ONLINE 24/7", 200
 
-PAY_TEXT = "Для оплаты переведите нужную сумму и укажите ID профиля в комментарии."
-SUPPORT_URL = "https://t.me/your_support"
-REVIEWS_URL = "https://t.me/your_reviews"
-OWNER_USERNAME = "@your_owner"
-STARS_MODE = True
-SUB_CHANNELS = []
-AD_CHANNEL = "@your_channel"
+@app.route('/health')
+def health():
+    return "OK", 200
 
-TRIALS = {
-    "mod": 1,
-    "sql": 1,
-    "adm": 1,
-    "conv": 1,
-    "apk": 1
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# Запуск Flask в отдельном потоке
+Thread(target=run_flask, daemon=True).start()
+
+# =====================================================================
+# 2. КОНФИГУРАЦИЯ И БАЗА ДАННЫХ
+# =====================================================================
+TOKEN = os.environ.get("VK_TOKEN", "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq03EeLvxI2gZwJSVvuWMv0eP7vv59FFJvPNYWpRI7R2nzXM0gbobnLpmRaI3yM751Cml4ZOPDcIc380c3hekN0jgZ3QeP76p9hn1Sw6kwK6mOCyomwB33nVy1uBGAbC0mDQpu5eiq2HlVDAKi4YjHYw")
+bot = Bot(token=TOKEN)
+
+MAIN_OWNER_ID = 897082738  # Главный VK ID владельца
+
+DB_FILE = "chat_manager_db.json"
+
+DEFAULT_ROLES = {
+    100: "Основатель",
+    95: "Зам. Основателя",
+    90: "Руководитель Проекта",
+    88: "Зам. Руководителя Проекта",
+    80: "Спец. Администратор",
+    77: "Красная Администрация",
+    75: "Зам. Специального Администратора",
+    70: "Команда Проекта",
+    60: "Главный Администратор",
+    55: "ОЗГА/ЗГА",
+    45: "Куратор Администрации"
 }
 
-ADS = {
-    "24": (24, 150, 50),
-    "48": (48, 250, 90),
-    "72": (72, 350, 130)
-}
-
-# ====================== DATABASE & SETTINGS ======================
-
-def load_json(path, default):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-SET = {
-    "pay_text": PAY_TEXT,
-    "support": SUPPORT_URL,
-    "reviews": REVIEWS_URL,
-    "owner": OWNER_USERNAME,
-    "stars_mode": STARS_MODE,
-    "prices": {},
-    "subs": SUB_CHANNELS,
-    "subs_on": True,
-    "ad_channel": AD_CHANNEL,
-    "admins": []
-}
-SET.update(load_json(SETTINGS_FILE, {}))
-
-def save_set():
-    save_json(SETTINGS_FILE, SET)
-
-db = sqlite3.connect("nexus.db", check_same_thread=False)
-db.execute("""
-CREATE TABLE IF NOT EXISTS users(
-    id INTEGER PRIMARY KEY,
-    premium INTEGER DEFAULT 0,
-    mod INTEGER,
-    sql INTEGER,
-    adm INTEGER,
-    conv INTEGER,
-    apk INTEGER,
-    banned INTEGER DEFAULT 0,
-    username TEXT,
-    joined INTEGER,
-    ban_until INTEGER,
-    ref_by INTEGER,
-    seen INTEGER
-)
-""")
-db.commit()
-
-def is_admin(uid):
-    return uid == ADMIN_ID or uid in SET.get("admins", [])
-
-def get_user(uid, username=None):
-    r = db.execute(
-        "SELECT premium, mod, sql, adm, conv, apk, banned, ban_until FROM users WHERE id=?", 
-        (uid,)
-    ).fetchone()
-    
-    if not r:
-        db.execute(
-            "INSERT INTO users(id, premium, mod, sql, adm, conv, apk, banned, username, joined) "
-            "VALUES(?, 0, ?, ?, ?, ?, ?, 0, ?, ?)",
-            (uid, TRIALS["mod"], TRIALS["sql"], TRIALS["adm"], TRIALS["conv"], TRIALS["apk"], username, int(time.time()))
-        )
-        db.commit()
-        return get_user(uid, username)
-        
-    if username:
-        db.execute("UPDATE users SET username=? WHERE id=?", (username, uid))
-        db.commit()
-        
-    d = dict(zip(("premium", "mod", "sql", "adm", "conv", "apk", "banned", "ban_until"), r))
-    d["banned"] = d["banned"] or 0
-    return d
-
-# ====================== KEYBOARDS & HELPERS ======================
-
-def main_menu(uid=None):
-    rows = [
-        [KeyboardButton(text="🔥 Бесплатный проект")],
-        [KeyboardButton(text="📊 Приобрести рекламу"), KeyboardButton(text="📍 Предложить слив")],
-        [KeyboardButton(text="⚡ Купить MOD ULTRA"), KeyboardButton(text="🔧 Разработка")],
-        [KeyboardButton(text="🎁 Промокод"), KeyboardButton(text="👥 Пригласить друзей")],
-        [KeyboardButton(text="🔨 Компиляция"), KeyboardButton(text="🎰 Рулетка")]
-    ]
-    if is_admin(uid):
-        rows.append([KeyboardButton(text="🛠 Админ-панель")])
-    return ReplyKeyboardMarkup(resize_keyboard=True, input_field_placeholder="Выбери нужный раздел...", keyboard=rows)
-
-def head(emoji, title):
-    return f"{emoji} <b>{title}</b>\n{LINE}\n\n"
-
-async def send_banner(m: Message, banner_name, text, markup=None):
-    path = os.path.join(IMG, banner_name) if banner_name else None
-    if path and os.path.exists(path):
+def load_db():
+    if os.path.exists(DB_FILE):
         try:
-            return await m.answer_photo(FSInputFile(path), caption=text, reply_markup=markup, parse_mode=ParseMode.HTML)
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Ошибка чтения БД, создаю новую: {e}")
+            return {}
+    return {}
+
+def save_db(data):
+    try:
+        temp_file = DB_FILE + ".tmp"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(temp_file, DB_FILE)
+    except Exception as e:
+        logging.error(f"Ошибка сохранения БД: {e}")
+
+db = load_db()
+if "chats" not in db: db["chats"] = {}
+if "global_chats" not in db: db["global_chats"] = []
+if "broadcast_admins" not in db: db["broadcast_admins"] = [MAIN_OWNER_ID]
+if "global_roles" not in db: db["global_roles"] = {}
+if "global_bans" not in db: db["global_bans"] = {}
+if "global_role_names" not in db: db["global_role_names"] = DEFAULT_ROLES.copy()
+if "leaders" not in db: db["leaders"] = {}
+if "unions" not in db: db["unions"] = {}
+if "logs" not in db: db["logs"] = []
+
+user_states = {}
+
+def add_log(text):
+    timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+    entry = f"{timestamp} {text}"
+    db["logs"].append(entry)
+    if len(db["logs"]) > 200:
+        db["logs"].pop(0)
+    save_db(db)
+
+def get_chat_data(peer_id):
+    p_str = str(peer_id)
+    if p_str not in db["chats"]:
+        db["chats"][p_str] = {
+            "members": {}, 
+            "bans": {},
+            "warns": {},
+            "mutes": {},
+            "role_names": DEFAULT_ROLES.copy()
+        }
+    return db["chats"][p_str]
+
+async def get_chat_owner_id(peer_id):
+    try:
+        chat_info = await bot.api.messages.get_conversations_by_peer_ids(peer_ids=[peer_id])
+        if chat_info and chat_info.items:
+            return chat_info.items[0].chat_settings.owner_id
+    except Exception as e:
+        logging.warning(f"Ошибка получения владельца чата {peer_id}: {e}")
+    return None
+
+def get_user_level(message: Message, chat_data: dict, chat_owner_id: int) -> int:
+    uid = message.from_id
+    if uid == MAIN_OWNER_ID or uid in db["broadcast_admins"]:
+        return 100
+    if chat_owner_id and uid == chat_owner_id:
+        return 100
+    if str(uid) in db["global_roles"]:
+        return db["global_roles"][str(uid)]
+    
+    m_info = chat_data["members"].get(str(uid), {"level": 0})
+    if isinstance(m_info, dict):
+        return m_info.get("level", 0)
+    return int(m_info)
+
+async def resolve_target(message: Message, args: list):
+    if message.reply_message:
+        return message.reply_message.from_id, args
+    if not args:
+        return None, []
+    
+    target_raw = args[0]
+    identifier = target_raw.strip().replace("https://vk.com/", "").replace("vk.com/", "").replace("@", "").replace("id", "")
+    
+    target_id = None
+    remaining_args = args[1:]
+    
+    if identifier.isdigit():
+        target_id = int(identifier)
+    else:
+        try:
+            user_info = await bot.api.users.get(user_ids=[identifier])
+            if user_info:
+                target_id = user_info[0].id
         except Exception:
             pass
-    return await m.answer(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+            
+    if not target_id:
+        return None, args
+        
+    return target_id, remaining_args
 
-# ====================== STATES ======================
 
-class States(StatesGroup):
-    promo = State()
-    admin_broadcast = State()
-    admin_user = State()
-    dev_pwn = State()
-    dev_sql = State()
-    roulette = State()
+# =====================================================================
+# 3. ЛИЧНЫЕ СООБЩЕНИЯ (ПАНЕЛЬ УПРАВЛЕНИЯ В ЛС)
+# =====================================================================
 
-# ====================== ROUTERS & HANDLERS ======================
-
-router = Router()
-
-@router.message(CommandStart())
-@router.message(F.text == "Главное меню")
-async def cmd_start(m: Message, state: FSMContext):
-    await state.clear()
-    u = m.from_user
-    get_user(u.id, u.username)
-    text = (
-        head("🖐", f"Добро пожаловать, {html.escape(u.full_name)}!") +
-        f"<b>{BOT_NAME}</b> — профессиональная студия разработки, модов и скриптов.\n\n"
-        "🔥 <b>Доступные услуги:</b>\n"
-        "• Бесплатные проекты и сливы\n"
-        "• Компилятор и конвертер кода\n"
-        "• Заказ разработки и модов (MOD ULTRA)\n"
-        "• Покупка рекламы и продвижение\n\n" +
-        LINE + "\n<i>Используй кнопки ниже для навигации.</i>"
-    )
-    await send_banner(m, "main.jpg", text, main_menu(u.id))
-
-@router.message(F.text == "🔥 Бесплатный проект")
-async def free_project(m: Message):
-    text = (
-        head("🔥", "Бесплатный проект") +
-        "Вот твой бесплатный стартовый проект от BLACK STUDIO!\n\n"
-        "Скачивай архив и приступай к работе."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📥 Скачать проект (.zip)", callback_data="download_free")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_home")]
-    ])
-    await send_banner(m, "shop.jpg", text, kb)
-
-@router.callback_query(F.data == "download_free")
-async def cb_download_free(call: CallbackQuery):
-    bio = io.BytesIO()
-    with zipfile.ZipFile(bio, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("README.txt", "Black Studio Free Project Template\nEnjoy coding!")
-        zf.writestr("main.pwn", "// Main Pawn script code here\nmain() {\n    print(\"Hello Black Studio!\");\n}")
-    bio.seek(0)
-    await call.message.answer_document(
-        BufferedInputFile(bio.read(), filename="BlackStudio_FreeProject.zip"),
-        caption="🎁 Вот твой бесплатный проект! Распакуй архив и открой в редакторе."
-    )
-    await call.answer()
-
-@router.message(F.text == "⚡ Купить MOD ULTRA")
-async def buy_mod(m: Message):
-    text = (
-        head("⚡", "MOD ULTRA") +
-        "Получи максимальные возможности и эксклюзивные исходники скриптов!\n\n"
-        "Цена: <b>450 ₽</b> или <b>150 Звёзд</b>."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Купить за Рубли", callback_data="pay:mod_rub")],
-        [InlineKeyboardButton(text="⭐ Купить за Звёзды", callback_data="pay:mod_stars")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_home")]
-    ])
-    await send_banner(m, "mod.jpg", text, kb)
-
-@router.callback_query(F.data.startswith("pay:"))
-async def cb_pay(call: CallbackQuery):
-    method = call.data.split(":")[1]
-    pay_type = 'Звёзды Telegram' if 'stars' in method else 'Перевод / Банковская карта'
-    text = (
-        head("💳", "Оплата заказа") +
-        f"Способ оплаты: <b>{pay_type}</b>\n\n"
-        f"{SET['pay_text']}\n\n"
-        f"После оплаты отправь скриншот чека в поддержку: <a href='{SUPPORT_URL}'>Написать в поддержку</a>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Написать в поддержку", url=SUPPORT_URL)],
-        [InlineKeyboardButton(text="◀️ Назад в меню", callback_data="back_home")]
-    ])
-    await call.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.HTML)
-    await call.answer()
-
-@router.message(F.text == "📊 Приобрести рекламу")
-async def buy_ads(m: Message):
-    text = head("📊", "Реклама в сети студии") + "Выбери подходящий тариф для продвижения своего канала или проекта:"
-    kb = []
-    for k, (hours, rub, stars) in ADS.items():
-        kb.append([InlineKeyboardButton(text=f"📢 Реклама {hours}ч — {rub}₽ / {stars}⭐", callback_data=f"buyad:{k}")])
-    kb.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_home")])
-    await send_banner(m, "ads.jpg", text, InlineKeyboardMarkup(inline_keyboard=kb))
-
-@router.callback_query(F.data.startswith("buyad:"))
-async def cb_buyad(call: CallbackQuery):
-    hours_key = call.data.split(":")[1]
-    h, rub, stars = ADS[hours_key]
-    text = (
-        head("📢", f"Реклама на {h} часов") +
-        f"Стоимость: <b>{rub} ₽</b> (или <b>{stars} ⭐</b>)\n\n"
-        f"{SET['pay_text']}"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Связаться с менеджером", url=SUPPORT_URL)],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_home")]
-    ])
-    await call.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.HTML)
-    await call.answer()
-
-@router.message(F.text == "📍 Предложить слив")
-async def offer_leak(m: Message):
-    text = (
-        head("📍", "Предложить слив / скрипт") +
-        "Хочешь поделиться крутым модом или скриптом?\n"
-        "Отправь файлы или ссылку напрямую администратору студии:"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📬 Отправить слив", url=SUPPORT_URL)],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_home")]
-    ])
-    await m.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
-
-@router.message(F.text == "🔧 Разработка")
-async def development_menu(m: Message):
-    text = (
-        head("🔧", "Заказ разработки") +
-        "Мы выполняем любые заказы: от написания модов до настройки MySQL и создания APK приложений."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💻 Заказать мод / скрипт", url=SUPPORT_URL)],
-        [InlineKeyboardButton(text="🗄 Настройка MySQL", url=SUPPORT_URL)],
-        [InlineKeyboardButton(text="📱 Создание APK", url=SUPPORT_URL)],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_home")]
-    ])
-    await send_banner(m, "dev.jpg", text, kb)
-
-@router.message(F.text == "🎁 Промокод")
-async def promo_start(m: Message, state: FSMContext):
-    await state.set_state(States.promo)
-    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Главное меню")]], resize_keyboard=True)
-    await m.answer(head("🎁", "Активация промокода") + "Введи промокод в чат:", reply_markup=kb, parse_mode=ParseMode.HTML)
-
-@router.message(States.promo)
-async def promo_process(m: Message, state: FSMContext):
-    await state.clear()
-    code = m.text.strip()
-    if code.upper() == "BLACK2025":
-        await m.answer("🎉 Промокод успешно активирован! Тебе начислена премиум-подписка на 24 часа.", reply_markup=main_menu(m.from_user.id))
-    else:
-        await m.answer("❌ Неверный или просроченный промокод.", reply_markup=main_menu(m.from_user.id))
-
-@router.message(F.text == "👥 Пригласить друзей")
-async def invite_friends(m: Message):
-    bot_info = await m.bot.get_me()
-    link = f"https://t.me/{bot_info.username}?start=ref_{m.from_user.id}"
-    text = (
-        head("👥", "Реферальная система") +
-        "Приглашай друзей в нашу студию и получай бонусы!\n\n"
-        f"🔗 Твоя реферальная ссылка:\n<code>{link}</code>"
-    )
-    await m.answer(text, reply_markup=main_menu(m.from_user.id), parse_mode=ParseMode.HTML)
-
-@router.message(F.text == "🔨 Компиляция")
-async def compiler_info(m: Message):
-    text = head("🔨", "Онлайн Компилятор") + "Отправь свой файл с кодом (.pwn или текст скрипта), и бот выполнит тестовую проверку."
-    await m.answer(text, reply_markup=main_menu(m.from_user.id), parse_mode=ParseMode.HTML)
-
-@router.message(F.text == "🎰 Рулетка")
-async def roulette(m: Message):
-    prizes = ["50 рублей на баланс", "Премиум на 1 час", "Бесплатный мод", "Попробуй еще раз!", "Скидка 20%"]
-    prize = random.choice(prizes)
-    text = head("🎰", "Колесо Фортуны") + f"🎰 Результат розыгрыша:\n\n<b>{prize}</b>!"
-    await m.answer(text, reply_markup=main_menu(m.from_user.id), parse_mode=ParseMode.HTML)
-
-@router.callback_query(F.data == "back_home")
-async def cb_back(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    u = call.from_user
-    text = head("🖐", f"Главное меню, {html.escape(u.full_name)}") + "Выбери нужный раздел в меню ниже:"
-    await call.message.delete()
-    await send_banner(call.message, "main.jpg", text, main_menu(u.id))
-
-# ====================== MAIN LAUNCHER ======================
-
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
+@bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
+async def private_start(message: Message):
+    uid = message.from_id
+    if uid in user_states: del user_states[uid]
+    is_main = (uid == MAIN_OWNER_ID)
+    has_broadcast = (is_main or uid in db["broadcast_admins"])
     
-    print("Бот успешно запущен!")
-    await dp.start_polling(bot)
+    kb = Keyboard(one_time=False, inline=False)
+    kb.add(Text("🌐 Сайт проекта"), color=KeyboardButtonColor.POSITIVE)
+    if has_broadcast:
+        kb.row()
+        kb.add(Text("📢 Рассылка"), color=KeyboardButtonColor.NEGATIVE)
+    if is_main:
+        kb.row()
+        kb.add(Text("⚙️ Управление доступами"), color=KeyboardButtonColor.PRIMARY)
+    
+    await message.answer(
+        "👑 **PRINCE RUSSIA — ADMIN PANEL** 👑\n\n"
+        "Система управления ботом и проектом активна.",
+        keyboard=kb.get_json()
+    )
+
+@bot.on.private_message(text="⚙️ Управление доступами")
+async def private_access_panel(message: Message):
+    if message.from_id != MAIN_OWNER_ID: return
+    kb = Keyboard(one_time=False, inline=True)
+    kb.add(Text("➕ Выдать доступ"), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Text("➖ Забрать доступ"), color=KeyboardButtonColor.NEGATIVE)
+    kb.row()
+    kb.add(Text("🔙 Главное меню"), color=KeyboardButtonColor.PRIMARY)
+    
+    admins_list = ", ".join([f"[id{aid}|ID {aid}]" for aid in db["broadcast_admins"]])
+    await message.answer(
+        f"⚙️ **УПРАВЛЕНИЕ ДОСТУПОМ К РАССЫЛКЕ**\n\n"
+        f"Администраторы рассылки:\n{admins_list}",
+        keyboard=kb.get_json()
+    )
+
+@bot.on.private_message(text="➕ Выдать доступ")
+async def private_add_adm(message: Message):
+    if message.from_id != MAIN_OWNER_ID: return
+    user_states[message.from_id] = "wait_add_adm"
+    await message.answer("✍️ Введите VK ID пользователя:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
+
+@bot.on.private_message(text="➖ Забрать доступ")
+async def private_rem_adm(message: Message):
+    if message.from_id != MAIN_OWNER_ID: return
+    user_states[message.from_id] = "wait_rem_adm"
+    await message.answer("✍️ Введите VK ID пользователя:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
+
+@bot.on.private_message(text="📢 Рассылка")
+async def private_broadcast(message: Message):
+    uid = message.from_id
+    if uid != MAIN_OWNER_ID and uid not in db["broadcast_admins"]: return
+    user_states[uid] = "wait_broadcast"
+    await message.answer("✍️ Введите текст для глобальной рассылки:", keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json())
+
+@bot.on.private_message(text="🌐 Сайт проекта")
+async def private_site(message: Message):
+    await message.answer("🌐 Официальный сайт Prince Russia: https://site-prince-russia.samp.date/")
+
+@bot.on.private_message()
+async def private_handler(message: Message):
+    uid = message.from_id
+    text = message.text
+    if not text: return
+    state = user_states.get(uid)
+
+    if state == "wait_add_adm" and uid == MAIN_OWNER_ID:
+        del user_states[uid]
+        clean = text.strip().replace("id", "")
+        if clean.isdigit():
+            tid = int(clean)
+            if tid not in db["broadcast_admins"]:
+                db["broadcast_admins"].append(tid)
+                save_db(db)
+                return await message.answer(f"✅ Пользователю [id{tid}|ID {tid}] выдан доступ к рассылке.")
+        return await message.answer("❌ Некорректный ID.")
+
+    if state == "wait_rem_adm" and uid == MAIN_OWNER_ID:
+        del user_states[uid]
+        clean = text.strip().replace("id", "")
+        if clean.isdigit():
+            tid = int(clean)
+            if tid != MAIN_OWNER_ID and tid in db["broadcast_admins"]:
+                db["broadcast_admins"].remove(tid)
+                save_db(db)
+                return await message.answer(f"✅ Доступ забран у [id{tid}|ID {tid}].")
+        return await message.answer("❌ Некорректный ID.")
+
+    if state == "wait_broadcast" and (uid == MAIN_OWNER_ID or uid in db["broadcast_admins"]):
+        del user_states[uid]
+        count = 0
+        for cid in db.get("global_chats", []):
+            try:
+                await bot.api.messages.send(peer_id=int(cid), message=f"📢 **ГЛОБАЛЬНОЕ СООБЩЕНИЕ:**\n\n{text}", random_id=0)
+                count += 1
+            except Exception as e:
+                logging.error(f"Ошибка рассылки в {cid}: {e}")
+        add_log(f"Глобальная рассылка от ID {uid} в {count} чатов.")
+        return await message.answer(f"✅ Сообщение успешно доставлено в {count} чат(ов).")
+
+    await message.answer("❌ Воспользуйтесь кнопками меню или отправьте команду.")
+
+
+# =====================================================================
+# 4. ОБРАБОТКА КОМАНД И МОДЕРАЦИИ В БЕСЕДАХ
+# =====================================================================
+
+@bot.on.chat_message()
+async def chat_handler(message: Message):
+    peer_id = message.peer_id
+    
+    if peer_id not in db["global_chats"]:
+        db["global_chats"].append(peer_id)
+        save_db(db)
+
+    chat_data = get_chat_data(peer_id)
+    chat_owner_id = await get_chat_owner_id(peer_id)
+
+    if chat_owner_id:
+        o_str = str(chat_owner_id)
+        if o_str not in chat_data["members"]:
+            chat_data["members"][o_str] = {"level": 100, "nickname": "[Создатель]"}
+        else:
+            chat_data["members"][o_str]["level"] = 100
+        save_db(db)
+
+    # Проверка выданных банов при входе нового участника
+    if message.action and message.action.type in ["chat_invite_user", "chat_invite_user_by_link"]:
+        j_id = message.action.member_id if message.action.member_id else message.from_id
+        if str(j_id) in db["global_bans"] or str(j_id) in chat_data.get("bans", {}):
+            try:
+                await bot.api.messages.remove_chat_user(chat_id=message.chat_id, user_id=j_id)
+                await message.answer(f"⛔ Пользователь [id{j_id}|был изгнан]: У него активная блокировка!")
+            except Exception:
+                pass
+            return
+
+    uid = str(message.from_id)
+
+    # Проверка на наличие мута
+    if uid in chat_data.get("mutes", {}):
+        if time.time() < chat_data["mutes"][uid]:
+            try:
+                await bot.api.messages.delete(peer_id=peer_id, conversation_message_ids=[message.conversation_message_id], delete_for_all=True)
+            except Exception:
+                pass
+            return
+        else:
+            del chat_data["mutes"][uid]
+            save_db(db)
+
+    text = message.text
+    if not text: return
+    clean_text = text.lower().strip()
+
+    # Очистка обращения к боту через упоминание
+    for mention in [f"[club{message.group_id}|@", "@club", "@public"]:
+        if mention in clean_text:
+            parts = clean_text.split(" ", 1)
+            if len(parts) > 1:
+                clean_text = parts[1].strip()
+
+    if clean_text in ["/menu", "меню"]:
+        kb = Keyboard(one_time=False, inline=True)
+        kb.add(Text("🌐 Сайт"), color=KeyboardButtonColor.POSITIVE)
+        kb.add(Text("📜 Правила"), color=KeyboardButtonColor.PRIMARY)
+        kb.row()
+        kb.add(Text("📋 Роли"), color=KeyboardButtonColor.POSITIVE)
+        kb.add(Text("📊 Стата"), color=KeyboardButtonColor.PRIMARY)
+        return await message.answer("👑 **ПАНЕЛЬ УПРАВЛЕНИЯ БЕСЕДОЙ**", keyboard=kb.get_json())
+
+    if clean_text in ["📜 правила", "правила"]:
+        return await message.answer("📜 **ПРАВИЛА БЕСЕДЫ:**\n1. Запрещен спам и реклама.\n2. Уважительное отношение к участникам и админам.\n3. Получение 3/3 предупреждений ведет к кику.")
+
+    if clean_text in ["📋 роли", "/roles", "роли"]:
+        r_list = "📋 **ИЕРАРХИЯ ДОЛЖНОСТЕЙ:**\n"
+        all_roles = {**db["global_role_names"], **chat_data["role_names"]}
+        for lvl in sorted(all_roles.keys(), key=int, reverse=True):
+            r_list += f"• `{lvl}` ➔ **{all_roles[lvl]}**\n"
+        return await message.answer(r_list)
+
+    if not clean_text.startswith("/"):
+        return
+
+    args = clean_text[1:].split()
+    cmd = args[0] if args else ""
+    params = args[1:] if len(args) > 1 else []
+
+    user_lvl = get_user_level(message, chat_data, chat_owner_id)
+
+    # --- СИСТЕМА МОДЕРАЦИИ И КОМАНД ---
+
+    if cmd == "mute":
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите цель.")
+        mins = int(rem[0]) if rem and rem[0].isdigit() else 10
+        chat_data["mutes"][str(tid)] = time.time() + (mins * 60)
+        save_db(db)
+        add_log(f"Мут: ID {tid} на {mins} мин от ID {message.from_id}")
+        return await message.answer(f"🤫 Пользователю [id{tid}|выдан мут] на {mins} минут.")
+
+    elif cmd in ["unmute", "unmite"]:
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if tid and str(tid) in chat_data["mutes"]:
+            del chat_data["mutes"][str(tid)]
+            save_db(db)
+            return await message.answer(f"🔊 С [id{tid}|пользователя] снят мут.")
+        return await message.answer("❌ Активный мут не найден.")
+
+    elif cmd == "ban":
+        if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите цель.")
+        reason = " ".join(rem) if rem else "Причина не указана"
+        chat_data["bans"][str(tid)] = {"reason": reason}
+        save_db(db)
+        try:
+            await bot.api.messages.remove_chat_user(chat_id=message.chat_id, user_id=tid)
+        except Exception:
+            pass
+        add_log(f"Бан в чате: ID {tid}, причина: {reason}")
+        return await message.answer(f"🚫 Пользователь [id{tid}|забанен]. Причина: {reason}")
+
+    elif cmd == "unban":
+        if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if tid and str(tid) in chat_data["bans"]:
+            del chat_data["bans"][str(tid)]
+            save_db(db)
+            return await message.answer(f"🟢 [id{tid}|Пользователь] разбанен.")
+        return await message.answer("❌ Пользователь не находится в бане.")
+
+    elif cmd == "banlist":
+        bans = chat_data.get("bans", {})
+        if not bans: return await message.answer("📋 Бан-лист пуст.")
+        msg = "📋 **СПИСОК ЗАБЛОКИРОВАННЫХ:**\n"
+        for b_id, info in bans.items():
+            msg += f"• [id{int(b_id)}|Игрок] ➔ Причина: {info.get('reason')}\n"
+        return await message.answer(msg)
+
+    elif cmd in ["chekban", "checkban"]:
+        tid, _ = await resolve_target(message, params)
+        if not tid: tid = message.from_id
+        is_b = str(tid) in chat_data.get("bans", {}) or str(tid) in db["global_bans"]
+        status = "Забанен 🔴" if is_b else "Чист 🟢"
+        return await message.answer(f"🔍 Статус блокировки [id{tid}|пользователя]: {status}")
+
+    elif cmd in ["stats", "стата"]:
+        tid, _ = await resolve_target(message, params)
+        if not tid: tid = message.from_id
+        lvl = get_user_level(message, chat_data, chat_owner_id)
+        all_r = {**db["global_role_names"], **chat_data["role_names"]}
+        r_name = all_r.get(lvl, "Участник")
+        warns = len(chat_data.get("warns", {}).get(str(tid), []))
+        return await message.answer(f"📊 **ПРОФИЛЬ** [id{tid}|пользователя]:\n• Должность: **{r_name}** `[{lvl} lvl]`\n• Предупреждения: `{warns}/3`")
+
+    elif cmd == "statschat":
+        c_count = len(db.get("global_chats", []))
+        m_count = len(chat_data.get("members", {}))
+        return await message.answer(f"📈 **СТАТИСТИКА БЕСЕДЫ:**\n• Сохранённых участников: `{m_count}`\n• Всего подключённых чатов: `{c_count}`")
+
+    elif cmd == "kick":
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите цель.")
+        try:
+            await bot.api.messages.remove_chat_user(chat_id=message.chat_id, user_id=tid)
+            return await message.answer(f"✅ Пользователь [id{tid}|изгнан].")
+        except Exception as e:
+            return await message.answer(f"❌ Ошибка исключения: {e}")
+
+    elif cmd == "warn":
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите цель.")
+        reason = " ".join(rem) if rem else "Причина не указана"
+        t_str = str(tid)
+        if t_str not in chat_data["warns"]: chat_data["warns"][t_str] = []
+        chat_data["warns"][t_str].append(reason)
+        save_db(db)
+        cnt = len(chat_data["warns"][t_str])
+        await message.answer(f"⚠️ Пользователю [id{tid}|выдано предупреждение] ({cnt}/3). Причина: {reason}")
+        if cnt >= 3:
+            try:
+                await bot.api.messages.remove_chat_user(chat_id=message.chat_id, user_id=tid)
+                chat_data["warns"][t_str] = []
+                save_db(db)
+                await message.answer(f"🚫 [id{tid}|Исключён] за достижение лимита предупреждений (3/3).")
+            except Exception:
+                pass
+
+    elif cmd == "unwarn":
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if tid and str(tid) in chat_data["warns"] and chat_data["warns"][str(tid)]:
+            chat_data["warns"][str(tid)].pop()
+            save_db(db)
+            return await message.answer(f"🟢 Предупреждение снято с [id{tid}|пользователя].")
+        return await message.answer("❌ Предупреждения отсутствуют.")
+
+    elif cmd == "vig":
+        if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите цель.")
+        return await message.answer(f"⚠️ Администратору [id{tid}|выдан выговор]. Причина: {' '.join(rem) if rem else 'Не указана'}")
+
+    elif cmd == "unvig":
+        if user_lvl < 55: return await message.answer("❌ Требуется 55+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if tid: return await message.answer(f"🟢 С администратора [id{tid}|снят выговор].")
+
+    elif cmd == "logs":
+        if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
+        recent = "\n".join(db["logs"][-15:])
+        return await message.answer(f"📜 **ПОСЛЕДНИЕ СОБЫТИЯ:**\n{recent if recent else 'Записи отсутствуют'}")
+
+    elif cmd == "welcome":
+        return await message.answer("👋 Приветствуем в официальной беседе проекта Prince Russia!")
+
+    elif cmd == "pin":
+        if user_lvl < 45: return await message.answer("❌ Требуется 45+ уровень.")
+        if not message.reply_message: return await message.answer("❌ Сделайте ответ на закрепляемое сообщение.")
+        try:
+            await bot.api.messages.pin(peer_id=peer_id, conversation_message_id=message.reply_message.conversation_message_id)
+            return await message.answer("📌 Сообщение зафиксировано.")
+        except Exception as e:
+            return await message.answer(f"❌ Ошибка закрепления: {e}")
+
+    elif cmd == "newrole":
+        if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
+        if len(params) < 2: return await message.answer("❌ Формат: `/newrole [уровень] [Название]`")
+        lvl_s = params[0]
+        if not lvl_s.isdigit(): return await message.answer("❌ Уровень должен быть числом.")
+        r_name = " ".join(params[1:])
+        chat_data["role_names"][int(lvl_s)] = r_name
+        save_db(db)
+        return await message.answer(f"✅ Назначена роль локального уровня `{lvl_s}` ➔ *{r_name}*")
+
+    elif cmd == "delrole":
+        if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
+        if not params or not params[0].isdigit(): return await message.answer("❌ Укажите уровень роли.")
+        lvl_i = int(params[0])
+        if lvl_i in chat_data["role_names"]:
+            del chat_data["role_names"][lvl_i]
+            save_db(db)
+            return await message.answer(f"🗑 Локальная роль `{lvl_i}` удалена.")
+        return await message.answer("❌ Роль с таким уровнем не найдена.")
+
+    elif cmd in ["выдатьроль", "роль"]:
+        if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите пользователя.")
+        lvl_val = 0
+        for p in rem:
+            if p.isdigit():
+                lvl_val = int(p)
+                break
+        chat_data["members"][str(tid)] = {"level": lvl_val, "nickname": chat_data["members"].get(str(tid), {}).get("nickname", "")}
+        save_db(db)
+        add_log(f"Назначена роль уровня {lvl_val} для ID {tid} пользователем ID {message.from_id}")
+        return await message.answer(f"✅ Пользователю [id{tid}|установлен] уровень прав `{lvl_val}`.")
+
+    elif cmd in ["removerole", "снятьроль"]:
+        if user_lvl < 70: return await message.answer("❌ Требуется 70+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите пользователя.")
+        chat_data["members"][str(tid)] = {"level": 0, "nickname": ""}
+        save_db(db)
+        return await message.answer(f"🟢 С [id{tid}|пользователя] сброшены все локальные роли.")
+
+    elif cmd == "grole":
+        if user_lvl < 95: return await message.answer("❌ Требуется 95+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid or not rem or not rem[0].isdigit(): return await message.answer("❌ Формат: `/grole [ID/упоминание] [уровень]`")
+        db["global_roles"][str(tid)] = int(rem[0])
+        save_db(db)
+        return await message.answer(f"🌐 Глобальная роль `{rem[0]}` успешно присвоена [id{tid}|пользователю].")
+
+    elif cmd == "grr":
+        if user_lvl < 95: return await message.answer("❌ Требуется 95+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        if tid and str(tid) in db["global_roles"]:
+            del db["global_roles"][str(tid)]
+            save_db(db)
+            return await message.answer(f"🟢 Глобальная роль аннулирована у [id{tid}|пользователя].")
+        return await message.answer("❌ Отсутствует глобальная роль.")
+
+    elif cmd in ["gnewrole", "gрнав"]:
+        if user_lvl < 100: return await message.answer("❌ Доступно только Должности 100.")
+        if len(params) < 2: return await message.answer("❌ Формат: `/gnewrole [уровень] [Название]`")
+        db["global_role_names"][int(params[0])] = " ".join(params[1:])
+        save_db(db)
+        return await message.answer("🌐 Глобальная роль создана в общей системе.")
+
+    elif cmd == "gban":
+        if user_lvl < 90: return await message.answer("❌ Требуется 90+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid: return await message.answer("❌ Укажите цель.")
+        reason = " ".join(rem) if rem else "Глобальное нарушение"
+        db["global_bans"][str(tid)] = reason
+        save_db(db)
+        add_log(f"Глобальный бан: ID {tid}, причина: {reason}")
+        return await message.answer(f"⛔ **ГЛОБАЛЬНАЯ БЛОКИРОВКА** для [id{tid}|пользователя]! Причина: {reason}")
+
+    elif cmd == "bonus":
+        return await message.answer("🎁 Игровой бонус: Скачайте клиент Prince Russia на сайте и получите 25.000.000$ + 1000 BC!")
+
+    elif cmd == "admins":
+        a_msg = "👑 **СПИСОК АДМИНИСТРАЦИИ В БЕСЕДЕ:**\n"
+        found = False
+        for m_id, info in chat_data.get("members", {}).items():
+            lvl = info.get("level", 0) if isinstance(info, dict) else info
+            if lvl >= 45:
+                all_r = {**db["global_role_names"], **chat_data["role_names"]}
+                found = True
+                a_msg += f"• [id{int(m_id)}|Администратор] ➔ {all_r.get(lvl, 'Админ')} `[{lvl} lvl]`\n"
+        return await message.answer(a_msg if found else "📋 В беседе нет участников с административным доступом.")
+
+    elif cmd == "leaders":
+        p_str = str(peer_id)
+        chat_leads = db["leaders"].get(p_str, {})
+        if not chat_leads: return await message.answer("📋 В текущей беседе лидеры не назначены.")
+        l_msg = "📋 **СПИСОК ЛИДЕРОВ:**\n"
+        for l_id, org in chat_leads.items():
+            l_msg += f"• [id{int(l_id)}|Лидер] ➔ Организация: `{org}`\n"
+        return await message.answer(l_msg)
+
+    elif cmd == "setleader":
+        if user_lvl < 60: return await message.answer("❌ Требуется 60+ уровень.")
+        tid, rem = await resolve_target(message, params)
+        if not tid or not rem: return await message.answer("❌ Формат: `/setleader [ответ/id] [Название организации]`")
+        org_name = " ".join(rem)
+        p_str = str(peer_id)
+        if p_str not in db["leaders"]: db["leaders"][p_str] = {}
+        db["leaders"][p_str][str(tid)] = org_name
+        save_db(db)
+        return await message.answer(f"👑 Пользователь [id{tid}|назначен лидером]: *{org_name}*")
+
+    elif cmd == "removeleader":
+        if user_lvl < 60: return await message.answer("❌ Требуется 60+ уровень.")
+        tid, _ = await resolve_target(message, params)
+        p_str = str(peer_id)
+        if tid and p_str in db["leaders"] and str(tid) in db["leaders"][p_str]:
+            del db["leaders"][p_str][str(tid)]
+            save_db(db)
+            return await message.answer(f"🟢 С [id{tid}|пользователя] сняты полномочия лидера.")
+        return await message.answer("❌ Пользователь не найден среди лидеров.")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.info("🚀 Запуск Prince Russia VK Core Engine...")
+    bot.run_forever()
+```
+
+### Главные улучшения в файле:
+1. **Безопасная запись БД:** Применяется концепция *Atomic Write* (сохранение во временный файл `.tmp` с последующей заменой), что защищает JSON от повреждения при неожиданных перезапусках контейнера Render.
+2. **Маршруты проверки работоспособности (Health-check):** Эндпоинты `/` и `/health` работают с корректными `HTTP 200 OK` ответами для Render Ping-сервисов.
+3. **Логирование:** Простой `print` заменен на стандартный модуль `logging` Python для удобного отслеживания событий прямо в веб-интерфейсе Render Dashboard.
