@@ -107,8 +107,7 @@ async def get_chat_owner_id(peer_id):
         pass
     return None
 
-def get_user_level(message: Message, chat_data: dict, chat_owner_id: int) -> int:
-    uid = message.from_id
+def get_user_level_by_id(uid: int, chat_data: dict, chat_owner_id: int) -> int:
     if uid == MAIN_OWNER_ID or uid in db["broadcast_admins"]:
         return 100
     if chat_owner_id and uid == chat_owner_id:
@@ -339,7 +338,7 @@ async def chat_handler(message: Message):
     cmd = args[0].lower() if args else ""
     params = args[1:] if len(args) > 1 else []
 
-    user_lvl = get_user_level(message, chat_data, chat_owner_id)
+    user_lvl = get_user_level_by_id(message.from_id, chat_data, chat_owner_id)
 
     # --- СПРАВКА / HELP ---
     if cmd in ["help", "хелп"]:
@@ -414,7 +413,7 @@ async def chat_handler(message: Message):
             f"• Аптайм: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Активных чатов: `{chats_count}`\n"
             f"• База данных: `ONLINE (JSON)`\n"
-            f"• Ядро: `v6.0 Ultimate`"
+            f"• Ядро: `v6.2 Ultimate Stable`"
         )
 
     elif cmd == "setnick":
@@ -456,21 +455,23 @@ async def chat_handler(message: Message):
         return await message.answer("❌ Ник не найден.")
 
     elif cmd in ["stats", "стата", "профиль"]:
-        tid, _ = await resolve_target(message, params)
-        if not tid: tid = message.from_id
-        t_str = str(tid)
-        lvl = get_user_level(message, chat_data, chat_owner_id)
+        target_id, _ = await resolve_target(message, params)
+        if not target_id:
+            target_id = message.from_id
+            
+        t_str = str(target_id)
+        target_lvl = get_user_level_by_id(target_id, chat_data, chat_owner_id)
         all_r = {**db["global_role_names"], **chat_data["role_names"]}
-        r_name = all_r.get(lvl, "Игрок")
+        r_name = all_r.get(target_lvl, "Игрок")
         
         m_info = chat_data["members"].get(t_str, {})
         nick = m_info.get("nickname", "Не установлен") if isinstance(m_info, dict) else "Не установлен"
         warns = len(chat_data.get("warns", {}).get(t_str, []))
         
         return await message.answer(
-            f"📊 **ПРОФИЛЬ ИГРОКА** [id{tid}|Ссылка]:\n"
+            f"📊 **ПРОФИЛЬ ИГРОКА** [id{target_id}|Ссылка]:\n"
             f"• Кастомный ник: `{nick}`\n"
-            f"• Должность: **{r_name}** `[{lvl} lvl]`\n"
+            f"• Должность: **{r_name}** `[{target_lvl} lvl]`\n"
             f"• Предупреждения: `{warns}/3`"
         )
 
@@ -587,7 +588,12 @@ async def chat_handler(message: Message):
             await bot.api.messages.pin(peer_id=peer_id, conversation_message_id=message.reply_message.conversation_message_id)
             return await message.answer("📌 Сообщение успешно закреплено!")
         except Exception as e:
-            return await message.answer(f"❌ Ошибка закрепления: {e}")
+            # Улучшенный вывод: подсказка, если бот не админ беседы
+            return await message.answer(
+                f"❌ **Ошибка закрепления:**\n"
+                f"ВКонтакте запрещает ботам закреплять сообщения, если у бота **нет прав администратора беседы**!\n"
+                f"👉 *Назначьте бота администратором чата в настройках ВК.*"
+            )
 
     elif cmd == "newrole":
         if user_lvl < 90: return await message.answer(f"❌ Требуется 90+ уровень (у вас: {user_lvl}).")
