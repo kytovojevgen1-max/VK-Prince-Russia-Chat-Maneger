@@ -8,7 +8,39 @@ from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
 # =====================================================================
-# 1. ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ 24/7 (RENDER)
+# 1. НАСТРОЙКИ СБОРКИ (МЕНЯЮТСЯ В ОДНОМ МЕСТЕ ПОД ЛЮБОЙ ПРОЕКТ)
+# =====================================================================
+TOKEN = "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq03EeLvxI2gZwJSVvuWMv0eP7vv59FFJvPNYWpRI7R2nzXM0gbobnLpmRaI3yM751Cml4ZOPDcIc380c3hekN0jgZ3QeP76p9hn1Sw6kwK6mOCyomwB33nVy1uBGAbC0mDQpu5eiq2HlVDAKi4YjHYw"
+MAIN_OWNER_ID = 897082738  # Главный VK ID владельца бота (для ЛС-рассылки)
+
+DEFAULT_PROJECT_NAME = "CHAT MANAGER"
+DEFAULT_PROJECT_URL = "https://vk.com"
+DB_FILE = "chat_manager_db.json"
+
+DEFAULT_ROLES = {
+    100: "👑 Владелец / Основатель",
+    95: "💎 Зам. Основателя",
+    90: "🚀 Руководитель",
+    88: "⚡ Зам. Руководителя",
+    80: "🛡 Спец. Администратор",
+    77: "🔥 Красная Администрация",
+    75: "⭐ Зам. Спец. Админа",
+    70: "🛠 Старший Администратор",
+    60: "📌 Главный Администратор",
+    55: "🔸 Зам. Главного Админа",
+    45: "🔹 Куратор / Модератор"
+}
+
+DEFAULT_RULES = (
+    "📜 **РЕГЛАМЕНТ БЕСЕДЫ:**\n"
+    "1. Запрещён спам, флуд и сторонние рекламные ссылки.\n"
+    "2. Уважительное отношение к администрации и участникам.\n"
+    "3. Лимит предупреждений: 3 варна ➔ автоматический кик."
+)
+
+
+# =====================================================================
+# 2. ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ 24/7 (RENDER)
 # =====================================================================
 app = Flask(__name__)
 START_TIME = time.time()
@@ -18,7 +50,7 @@ def home():
     uptime_sec = int(time.time() - START_TIME)
     hours, remainder = divmod(uptime_sec, 3600)
     minutes, seconds = divmod(remainder, 60)
-    return f"Prince Russia Core Server: ONLINE 24/7 | Uptime: {hours}h {minutes}m {seconds}s"
+    return f"{DEFAULT_PROJECT_NAME} Server: ONLINE 24/7 | Uptime: {hours}h {minutes}m {seconds}s"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -28,40 +60,9 @@ Thread(target=run_flask, daemon=True).start()
 
 
 # =====================================================================
-# 2. КОНФИГУРАЦИЯ И БАЗА ДАННЫХ
+# 3. ИНИЦИАЛИЗАЦИЯ БОТА И БАЗЫ ДАННЫХ
 # =====================================================================
-TOKEN = "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq03EeLvxI2gZwJSVvuWMv0eP7vv59FFJvPNYWpRI7R2nzXM0gbobnLpmRaI3yM751Cml4ZOPDcIc380c3hekN0jgZ3QeP76p9hn1Sw6kwK6mOCyomwB33nVy1uBGAbC0mDQpu5eiq2HlVDAKi4YjHYw"
 bot = Bot(token=TOKEN)
-
-MAIN_OWNER_ID = 897082738  # Доступ к панели рассылки в ЛС
-DB_FILE = "chat_manager_db.json"
-
-DEFAULT_ROLES = {
-    100: "👑 Владелец / Основатель",
-    95: "💎 Зам. Основателя",
-    90: "🚀 Руководитель Проекта",
-    88: "⚡ Зам. Руководителя",
-    80: "🛡 Спец. Администратор",
-    77: "🔥 Красная Администрация",
-    75: "⭐ Зам. Спец. Админа",
-    70: "🛠 Команда Проекта",
-    60: "📌 Главный Администратор",
-    55: "🔸 ОЗГА / ЗГА",
-    45: "🔹 Куратор Администрации"
-}
-
-WELCOME_GUIDE = (
-    "👋 **Привет! Чат-менеджер PRINCE RUSSIA подключен к беседе!**\n\n"
-    "👑 **Владелец чата получает `100 lvl` админки** и отображается в `/admins` (`/админс`) и `/stats` (`/стата`).\n"
-    "Если бот не определил владельца автоматически — владелец чата может прописать `/явладелец` (если владелец ещё не задан) или `/сетвладелец @ник`.\n"
-    "📌 *Совет:* выдай боту права администратора в чате, чтобы работали кики, баны, муты, очистка и закреп сообщений.\n\n"
-    "⚡ **Быстрый старт:**\n"
-    "• `/menu` или `меню` — интерактивные кнопки в беседе\n"
-    "• `/help` или `/хелп` — полный список команд\n"
-    "• `/репорт [текст]` — отправить обращение администрации\n"
-    "• `/сник @ник [Ник]` — выдать ник (60+ lvl)\n"
-    "• `/сетадмин @ник [ур]` — выдать уровень прав (70+ lvl)"
-)
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -85,7 +86,6 @@ if "global_chats" not in db: db["global_chats"] = []
 if "broadcast_admins" not in db: db["broadcast_admins"] = [MAIN_OWNER_ID]
 if "global_roles" not in db: db["global_roles"] = {}
 if "global_bans" not in db: db["global_bans"] = {}
-if "global_role_names" not in db: db["global_role_names"] = DEFAULT_ROLES.copy()
 if "leaders" not in db: db["leaders"] = {}
 if "reports" not in db: db["reports"] = []
 if "logs" not in db: db["logs"] = []
@@ -109,7 +109,10 @@ def get_chat_data(peer_id):
             "bans": {},
             "warns": {},
             "mutes": {},
-            "role_names": DEFAULT_ROLES.copy(),
+            "role_names": {str(k): v for k, v in DEFAULT_ROLES.items()},
+            "rules_text": DEFAULT_RULES,
+            "project_name": DEFAULT_PROJECT_NAME,
+            "project_url": DEFAULT_PROJECT_URL,
             "welcomed": False,
             "owner_id": None,
             "antispam": False
@@ -119,11 +122,31 @@ def get_chat_data(peer_id):
     chat.setdefault("bans", {})
     chat.setdefault("warns", {})
     chat.setdefault("mutes", {})
-    chat.setdefault("role_names", DEFAULT_ROLES.copy())
+    chat.setdefault("role_names", {str(k): v for k, v in DEFAULT_ROLES.items()})
+    chat.setdefault("rules_text", DEFAULT_RULES)
+    chat.setdefault("project_name", DEFAULT_PROJECT_NAME)
+    chat.setdefault("project_url", DEFAULT_PROJECT_URL)
     chat.setdefault("welcomed", False)
     chat.setdefault("owner_id", None)
     chat.setdefault("antispam", False)
     return chat
+
+def build_welcome_guide(chat_data: dict) -> str:
+    proj = chat_data.get("project_name", DEFAULT_PROJECT_NAME)
+    return (
+        f"👋 **Привет! Чат-менеджер {proj} подключен к беседе!**\n\n"
+        "👑 **Владелец чата получает `100 lvl` админки** и отображается в `/admins` (`/админс`) и `/stats` (`/стата`).\n"
+        "Если бот не определил создателя автоматически — прописать `/явладелец` может только **создатель или администратор беседы (со звездой)**.\n"
+        "📌 *Совет:* выдай боту права администратора в беседе, чтобы работали кики, баны, муты, очистка и закреп сообщений.\n\n"
+        "⚡ **Быстрый старт:**\n"
+        "• `/menu` или `меню` — интерактивные кнопки в беседе\n"
+        "• `/help` или `/хелп` — полный список команд\n"
+        "• `/репорт [текст]` — отправить обращение администрации\n"
+        "• `/сник @ник [Ник]` — выдать ник (60+ lvl)\n"
+        "• `/сетадмин @ник [ур]` — выдать уровень прав (70+ lvl)\n"
+        "• `/сетправила [текст]` — изменить правила чата (70+ lvl)\n"
+        "• `/новаяроль [ур] [Название]` и `/удалитьроль [ур]` — настройка ролей (90+ lvl)"
+    )
 
 def sync_owner_member(chat_data: dict, owner_id: int | None):
     if owner_id and int(owner_id) > 0:
@@ -137,6 +160,20 @@ def sync_owner_member(chat_data: dict, owner_id: int | None):
             "nickname": nick,
             "is_owner": True
         }
+
+async def get_vk_chat_member_flags(peer_id: int, target_uid: int) -> tuple[bool, bool]:
+    """Возвращает (is_owner, is_admin) из VK API для участника беседы (серая звезда = is_admin)."""
+    try:
+        members_res = await bot.api.messages.get_conversation_members(peer_id=peer_id)
+        if members_res and getattr(members_res, "items", None):
+            for item in members_res.items:
+                if int(getattr(item, "member_id", 0)) == int(target_uid):
+                    is_own = bool(getattr(item, "is_owner", False))
+                    is_adm = bool(getattr(item, "is_admin", False))
+                    return is_own, (is_own or is_adm)
+    except Exception:
+        pass
+    return False, False
 
 async def resolve_chat_owner(peer_id, chat_data: dict):
     title = f"Беседа {peer_id}"
@@ -155,6 +192,19 @@ async def resolve_chat_owner(peer_id, chat_data: dict):
                     vk_owner_id = int(raw_owner)
     except Exception:
         pass
+
+    if not vk_owner_id:
+        try:
+            members_res = await bot.api.messages.get_conversation_members(peer_id=peer_id)
+            if members_res and getattr(members_res, "items", None):
+                for item in members_res.items:
+                    if getattr(item, "is_owner", False):
+                        m_id = int(getattr(item, "member_id", 0))
+                        if m_id > 0:
+                            vk_owner_id = m_id
+                            break
+        except Exception:
+            pass
 
     if vk_owner_id:
         chat_data["owner_id"] = vk_owner_id
@@ -193,12 +243,12 @@ def get_user_level_by_id(uid: int, chat_data: dict, owner_id: int | None) -> int
     return 0
 
 def get_role_title(lvl: int, chat_data: dict, owner_flag: bool = False) -> str:
-    all_r = {**db["global_role_names"], **chat_data["role_names"]}
+    chat_roles = chat_data.get("role_names", {})
     if owner_flag or lvl >= 100:
-        return all_r.get(100) or all_r.get("100") or "👑 Владелец / Основатель"
+        return chat_roles.get("100") or chat_roles.get(100) or "👑 Владелец / Основатель"
     if lvl <= 0:
         return "Участник"
-    return all_r.get(lvl) or all_r.get(str(lvl)) or "Администратор"
+    return chat_roles.get(str(lvl)) or chat_roles.get(lvl) or "Администратор"
 
 async def format_vk_user(uid: int) -> str:
     if uid <= 0:
@@ -282,12 +332,12 @@ def get_chat_inline_keyboard() -> str:
     kb.add(Text("🛠 Модерация"), color=KeyboardButtonColor.NEGATIVE)
     kb.add(Text("📖 Команды"), color=KeyboardButtonColor.SECONDARY)
     kb.row()
-    kb.add(Text("🌐 Сайт"), color=KeyboardButtonColor.SECONDARY)
+    kb.add(Text("🌐 Ссылка"), color=KeyboardButtonColor.SECONDARY)
     return kb.get_json()
 
 
 # =====================================================================
-# 3. ЛИЧНЫЕ СООБЩЕНИЯ (ПАНЕЛЬ УПРАВЛЕНИЯ В ЛС)
+# 4. ЛИЧНЫЕ СООБЩЕНИЯ (ПАНЕЛЬ УПРАВЛЕНИЯ В ЛС)
 # =====================================================================
 
 @bot.on.private_message(text=["/start", "Начать", "начать", "Меню", "меню", "🔙 Главное меню", "❌ Отмена"])
@@ -299,7 +349,7 @@ async def private_start(message: Message):
     has_broadcast = (is_main or uid in db["broadcast_admins"])
 
     kb = Keyboard(one_time=False, inline=False)
-    kb.add(Text("🌐 Сайт проекта"), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Text("🌐 Ссылка проекта"), color=KeyboardButtonColor.POSITIVE)
     if has_broadcast:
         kb.row()
         kb.add(Text("➕ Выдать доступ к рассылке"), color=KeyboardButtonColor.POSITIVE)
@@ -309,9 +359,9 @@ async def private_start(message: Message):
         kb.add(Text("📢 Начать рассылку по чатам"), color=KeyboardButtonColor.NEGATIVE)
 
     await message.answer(
-        "👑 **PRINCE RUSSIA — ULTIMATE ADMIN CONTROL x500** 👑\n\n"
-        "Добро пожаловать в центр управления сетью чатов проекта.\n"
-        "Владелец каждой беседы получает `100 lvl`.",
+        f"👑 **{DEFAULT_PROJECT_NAME} — ПАНЕЛЬ УПРАВЛЕНИЯ** 👑\n\n"
+        "Добро пожаловать в центр управления беседами.\n"
+        "Бот полностью автономен в каждом чате: владелец беседы получает `100 lvl`.",
         keyboard=kb.get_json()
     )
 
@@ -352,13 +402,13 @@ async def private_broadcast_start(message: Message):
         return
     user_states[uid] = "wait_broadcast"
     await message.answer(
-        "✍️ Введите текст для массовой отправки по всем беседам проекта:",
+        "✍️ Введите текст для массовой отправки по всем подключённым беседам:",
         keyboard=Keyboard(one_time=False, inline=True).add(Text("❌ Отмена"), color=KeyboardButtonColor.NEGATIVE).get_json()
     )
 
-@bot.on.private_message(text="🌐 Сайт проекта")
+@bot.on.private_message(text=["🌐 Ссылка проекта", "🌐 Сайт проекта"])
 async def private_site(message: Message):
-    await message.answer("🌐 Официальный портал Prince Russia: https://site-prince-russia.samp.date/")
+    await message.answer(f"🌐 Ссылка проекта: {DEFAULT_PROJECT_URL}")
 
 @bot.on.private_message()
 async def private_handler(message: Message):
@@ -386,11 +436,10 @@ async def private_handler(message: Message):
         count = 0
 
         broadcast_text = (
-            "📢 **ВНИМАНИЕ! ОФИЦИАЛЬНОЕ СООБЩЕНИЕ ОТ PRINCE RUSSIA** 📢\n\n"
+            "📢 **ВАЖНОЕ ОБЪЯВЛЕНИЕ** 📢\n\n"
             f"{text}\n\n"
             "═══════════════════════════\n"
-            f"👤 Ответственный за рассылку: {await format_vk_user(uid)}\n"
-            "🌐 Портал: https://site-prince-russia.samp.date/\n"
+            f"👤 Отправитель: {await format_vk_user(uid)}\n"
             "@all"
         )
 
@@ -405,12 +454,12 @@ async def private_handler(message: Message):
         return await message.answer(f"🚀 **Рассылка успешно завершена!**\n• Доставлено в беседы: `{count}`")
 
     await message.answer(
-        "👋 Бот готов к работе в любой беседе! Просто добавь его в чат, выдай права админа и используй `/menu` или `/help`."
+        "👋 Бот готов к работе в любой беседе! Добавь его в чат, выдай права администратора и используй `/menu` или `/help`."
     )
 
 
 # =====================================================================
-# 4. РАБОТА В БЕСЕДАХ (МОДЕРАЦИЯ, КНОПКИ, ТИКЕТЫ И КОМАНДЫ)
+# 5. РАБОТА В БЕСЕДАХ (МОДЕРАЦИЯ, КНОПКИ, ТИКЕТЫ И КОМАНДЫ)
 # =====================================================================
 
 @bot.on.chat_message()
@@ -435,7 +484,7 @@ async def chat_handler(message: Message):
         if is_bot_invited or (is_new_chat and not chat_data.get("welcomed")):
             chat_data["welcomed"] = True
             save_db(db)
-            await message.answer(WELCOME_GUIDE, keyboard=get_chat_inline_keyboard())
+            await message.answer(build_welcome_guide(chat_data), keyboard=get_chat_inline_keyboard())
             return
 
         if j_id and (str(j_id) in db["global_bans"] or str(j_id) in chat_data.get("bans", {})):
@@ -467,6 +516,8 @@ async def chat_handler(message: Message):
 
     raw_text = text.strip()
     clean_text = raw_text.lower()
+    proj_name = chat_data.get("project_name", DEFAULT_PROJECT_NAME)
+    proj_url = chat_data.get("project_url", DEFAULT_PROJECT_URL)
 
     user_lvl = get_user_level_by_id(uid_int, chat_data, owner_id)
     if chat_data.get("antispam") and user_lvl < 45:
@@ -490,37 +541,32 @@ async def chat_handler(message: Message):
                 clean_text = raw_text.lower()
 
     if clean_text in ["/menu", "/panel", "/панель", "меню", "панель"]:
-        return await message.answer("👑 **ПАНЕЛЬ УПРАВЛЕНИЯ БЕСЕДОЙ**", keyboard=get_chat_inline_keyboard())
+        return await message.answer(f"👑 **ПАНЕЛЬ УПРАВЛЕНИЯ — {proj_name}**", keyboard=get_chat_inline_keyboard())
 
-    if clean_text in ["🌐 сайт", "сайт"]:
-        return await message.answer("🌐 Официальный портал Prince Russia: https://site-prince-russia.samp.date/", keyboard=get_chat_inline_keyboard())
+    if clean_text in ["🌐 ссылка", "🌐 сайт", "ссылка", "сайт", "/link", "/ссылка"]:
+        return await message.answer(f"🌐 Ссылка проекта **{proj_name}**: {proj_url}", keyboard=get_chat_inline_keyboard())
 
-    if clean_text in ["📜 правила", "правила"]:
-        return await message.answer(
-            "📜 **РЕГЛАМЕНТ БЕСЕДЫ:**\n"
-            "1. Строго без спама и рекламы.\n"
-            "2. Уважение к администрации и участникам.\n"
-            "3. Лимит предупреждений: 3 варна ➔ автоматический кик.",
-            keyboard=get_chat_inline_keyboard()
-        )
+    if clean_text in ["📜 правила", "правила", "/rules", "/правила"]:
+        return await message.answer(chat_data.get("rules_text", DEFAULT_RULES), keyboard=get_chat_inline_keyboard())
 
     if clean_text in ["🛠 модерация", "модерация"]:
         return await message.answer(
-            "🛠 **ШПАРГАЛКА МОДЕРАЦИИ И ПРАВ**\n\n"
+            "🛠 **ШПАРГАЛКА МОДЕРАЦИИ И НАСТРОЕК**\n\n"
             "• `45+ lvl`: `/мут`, `/анмут`, `/варн`, `/варны`, `/анварн`, `/кик`, `/очистить`, `/закреп`, `/откреп`\n"
             "• `55+ lvl`: `/бан`, `/анбан`, `/банлист`, `/снятьвсеварны`\n"
             "• `60+ lvl`: `/сник`, `/делник`, `/сетлидер`, `/снятлидера`, `/ответить`\n"
-            "• `70+ lvl`: `/сетадмин`, `/снятьроль`, `/логи`, `/размутвсех`, `/антиспам`\n"
-            "• `90+ lvl`: `/сетвладелец`, `/сбросвладельца`, `/гбан`, `/новаяроль`, `/удалитьроль`\n\n"
-            "💡 *Пример:* `/сетадмин @evgenn09 70` или `/сник @evgenn09 Куратор`",
+            "• `70+ lvl`: `/сетадмин`, `/снятьроль`, `/сетправила`, `/сбросправил`, `/логи`, `/размутвсех`, `/антиспам`\n"
+            "• `90+ lvl`: `/новаяроль`, `/удалитьроль`, `/сбросролей`, `/сетназвание`, `/сетссылка`, `/сетвладелец`, `/сбросвладельца`, `/гбан`",
             keyboard=get_chat_inline_keyboard()
         )
 
     if clean_text in ["📋 роли", "/roles", "/роли", "роли"]:
-        r_list = "📋 **ИЕРАРХИЯ ДОЛЖНОСТЕЙ PRINCE RUSSIA:**\n\n"
-        all_roles = {**db["global_role_names"], **chat_data["role_names"]}
-        for lvl in sorted((int(k) for k in all_roles.keys()), reverse=True):
-            title = all_roles.get(lvl) or all_r_val if (all_r_val := all_roles.get(str(lvl))) else "Роль"
+        r_list = f"📋 **ИЕРАРХИЯ ДОЛЖНОСТЕЙ ({proj_name}):**\n\n"
+        chat_roles = chat_data.get("role_names", {})
+        if not chat_roles:
+            return await message.answer("📋 Список ролей в этом чате пуст.", keyboard=get_chat_inline_keyboard())
+        for lvl in sorted((int(k) for k in chat_roles.keys()), reverse=True):
+            title = chat_roles.get(str(lvl)) or chat_roles.get(lvl) or "Роль"
             r_list += f"• `{lvl} lvl` ➔ **{title}**\n"
         return await message.answer(r_list, keyboard=get_chat_inline_keyboard())
 
@@ -545,7 +591,7 @@ async def chat_handler(message: Message):
 
     if cmd in ["help", "хелп"]:
         help_msg = (
-            "📖 **ЭКСКЛЮЗИВНЫЙ СПИСОК КОМАНД PRINCE RUSSIA x500** 📖\n\n"
+            f"📖 **СПИСОК КОМАНД — {proj_name}** 📖\n\n"
             "💡 *Цель можно указать через `@ник`, `id`, ссылку или ответом (реплаем).*\n\n"
             "🌐 **Общий функционал:**\n"
             "• `/menu` (`/панель`) — интерактивные кнопки чата\n"
@@ -556,12 +602,12 @@ async def chat_handler(message: Message):
             "• `/nlist` (`/нлист`) — список ников участников\n"
             "• `/ник [текст]` — установить свой ник\n"
             "• `/roles` (`/роли`) — иерархия рангов\n"
+            "• `/rules` (`/правила`) — правила беседы\n"
             "• `/leaders` (`/лидеры`) — список лидеров\n"
             "• `/info` (`/инфо`) — информация о беседе\n"
             "• `/репорт [текст]` (`/report`) — создать тикет/репорт\n"
-            "• `/бонус` (`/bonus`) — бонусы проекта\n"
             "• `/пинг` (`/ping`) и `/статус` (`/status`) — пинг и аптайм\n"
-            "• `/явладелец` — закрепить владельца беседы (`100 lvl`), если он ещё не задан\n\n"
+            "• `/явладелец` — закрепить владельца (`100 lvl`), доступно только создателю/админу беседы со звездой\n\n"
         )
         if user_lvl >= 45:
             help_msg += (
@@ -595,32 +641,42 @@ async def chat_handler(message: Message):
             )
         if user_lvl >= 70:
             help_msg += (
-                "⚡ **Администрация (70+ lvl):**\n"
+                "⚡ **Администрация и кастомизация (70+ lvl):**\n"
                 "• `/сетадмин` (`/setadmin`, `/выдатьроль`, `/роль`) `[@ник/id/ответ] [ур]` — выдать уровень\n"
                 "• `/снятьроль` (`/removerole`) `[@ник/id/ответ]` — снять уровень (0 lvl)\n"
+                "• `/сетправила` (`/setrules`) `[новый текст]` — изменить правила беседы\n"
+                "• `/сбросправил` (`/resetrules`) — вернуть стандартные правила\n"
                 "• `/размутвсех` (`/unmuteall`) — снять все муты в чате\n"
                 "• `/антиспам` (`/antispam`) — вкл/выкл авто-удаление ссылок\n"
                 "• `/логи` (`/logs`) — системные логи\n\n"
             )
         if user_lvl >= 90:
             help_msg += (
-                "🔥 **Высший состав (90+ lvl):**\n"
+                "🔥 **Высший состав и настройка под проект (90+ lvl):**\n"
+                "• `/новаяроль` (`/newrole`) `[ур] [Название]` — создать/изменить роль\n"
+                "• `/удалитьроль` (`/delrole`) `[ур]` — удалить роль\n"
+                "• `/сбросролей` (`/resetroles`) — вернуть стандартные роли\n"
+                "• `/сетназвание` (`/setproject`) `[Название]` — задать название проекта для чата\n"
+                "• `/сетссылка` (`/seturl`) `[URL]` — задать ссылку кнопки для чата\n"
                 "• `/сетвладелец` (`/setowner`) `[@ник/id/ответ]` — закрепить владельца чата\n"
                 "• `/сбросвладельца` (`/resetowner`) — сбросить владельца чата\n"
                 "• `/гбан` (`/gban`) `[@ник/id/ответ] [причина]` — глобальный бан\n"
-                "• `/новаяроль` (`/newrole`) `[ур] [Название]` — создать роль\n"
-                "• `/удалитьроль` (`/delrole`) `[ур]` — удалить роль\n"
             )
         return await message.answer(help_msg, keyboard=get_chat_inline_keyboard())
 
     elif cmd in ["явладелец", "claimowner"]:
         if chat_data.get("owner_id"):
             return await message.answer(
-                f"❌ Владелец в этой беседе уже зафиксирован: {await format_vk_user(int(chat_data['owner_id']))}."
+                f"❌ Владелец в этой беседе уже закреплён: {await format_vk_user(int(chat_data['owner_id']))}."
+            )
+        is_vk_owner, is_vk_admin = await get_vk_chat_member_flags(peer_id, uid_int)
+        if not (is_vk_owner or is_vk_admin):
+            return await message.answer(
+                "⛔ Отказано! Команда `/явладелец` доступна только создателю или администратору беседы ВК (со звездой)."
             )
         sync_owner_member(chat_data, int(uid_int))
         save_db(db)
-        return await message.answer("👑 Вы закреплены владельцем этой беседы (`100 lvl`).")
+        return await message.answer("👑 Статус подтверждён! Вы закреплены владельцем этой беседы (`100 lvl`).")
 
     elif cmd in ["сбросвладельца", "resetowner"]:
         if user_lvl < 90:
@@ -630,7 +686,43 @@ async def chat_handler(message: Message):
         if old_owner and str(old_owner) in chat_data["members"]:
             del chat_data["members"][str(old_owner)]
         save_db(db)
-        return await message.answer("♻️ Владелец беседы сброшен. Теперь можно назначить нового через `/сетвладелец` или `/явладелец`.")
+        return await message.answer("♻️ Владелец беседы сброшен. Новый владелец может прописать `/явладелец` или быть назначен через `/сетвладелец`.")
+
+    elif cmd in ["setrules", "сетправила"]:
+        if user_lvl < 70:
+            return await message.answer(f"❌ Требуется 70+ уровень (у вас: {user_lvl}).")
+        new_rules = raw_text.split(None, 1)[1].strip() if len(raw_text.split(None, 1)) > 1 else ""
+        if not new_rules:
+            return await message.answer("❌ Формат: `/сетправила [новый текст правил беседы]`")
+        chat_data["rules_text"] = new_rules
+        save_db(db)
+        return await message.answer("✅ Новые правила беседы сохранены! Проверить: `/правила` или кнопка «📜 Правила».")
+
+    elif cmd in ["resetrules", "сбросправил"]:
+        if user_lvl < 70:
+            return await message.answer(f"❌ Требуется 70+ уровень (у вас: {user_lvl}).")
+        chat_data["rules_text"] = DEFAULT_RULES
+        save_db(db)
+        return await message.answer("♻️ Правила беседы сброшены к стандартным.")
+
+    elif cmd in ["setproject", "сетназвание"]:
+        if user_lvl < 90:
+            return await message.answer(f"❌ Требуется 90+ уровень (у вас: {user_lvl}).")
+        new_name = raw_text.split(None, 1)[1].strip() if len(raw_text.split(None, 1)) > 1 else ""
+        if not new_name:
+            return await message.answer("❌ Формат: `/сетназвание [Название проекта]`")
+        chat_data["project_name"] = new_name[:50]
+        save_db(db)
+        return await message.answer(f"✅ Название проекта для этой беседы изменено на: **{chat_data['project_name']}**")
+
+    elif cmd in ["seturl", "сетссылка"]:
+        if user_lvl < 90:
+            return await message.answer(f"❌ Требуется 90+ уровень (у вас: {user_lvl}).")
+        if not params:
+            return await message.answer("❌ Формат: `/сетссылка [https://...]`")
+        chat_data["project_url"] = params[0].strip()
+        save_db(db)
+        return await message.answer(f"✅ Ссылка проекта для этой беседы обновлена: {chat_data['project_url']}")
 
     elif cmd in ["ping", "пинг"]:
         start_t = time.time()
@@ -650,11 +742,11 @@ async def chat_handler(message: Message):
         minutes, seconds = divmod(remainder, 60)
         chats_count = len(db.get("global_chats", []))
         return await message.answer(
-            f"⚡ **СТАТУС ЯДРА PRINCE RUSSIA x500**\n\n"
+            f"⚡ **СТАТУС ЯДРА {proj_name}**\n\n"
             f"• Аптайм сервера: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Подключено чатов: `{chats_count}`\n"
             f"• Репортов в базе: `{len(db.get('reports', []))}`\n"
-            f"• Версия сборки: `v10.4 Fixed Owner Sync`"
+            f"• Сборка: `Universal White-Label Edition`"
         )
 
     elif cmd in ["info", "инфо"]:
@@ -662,7 +754,8 @@ async def chat_handler(message: Message):
         antispam_str = "🟢 Включён" if chat_data.get("antispam") else "🔴 Выключен"
         return await message.answer(
             f"ℹ️ **ИНФОРМАЦИЯ О БЕСЕДЕ**\n\n"
-            f"• Название: **{chat_title}**\n"
+            f"• Беседа: **{chat_title}**\n"
+            f"• Проект: **{proj_name}**\n"
             f"• Peer ID: `{peer_id}`\n"
             f"• Владелец: {owner_fmt}\n"
             f"• Антиспам ссылок: {antispam_str}\n"
@@ -1046,7 +1139,7 @@ async def chat_handler(message: Message):
         if user_lvl < 70:
             return await message.answer(f"❌ Доступно с 70 уровня (у вас: {user_lvl}).")
         recent = "\n".join(db["logs"][-15:])
-        return await message.answer(f"📜 **СИСТЕМНЫЕ ЛОГИ ПРОЕКТА:**\n\n{recent if recent else 'Журнал пуст'}")
+        return await message.answer(f"📜 **СИСТЕМНЫЕ ЛОГИ:**\n\n{recent if recent else 'Журнал пуст'}")
 
     elif cmd in ["pin", "закреп"]:
         if user_lvl < 45:
@@ -1087,19 +1180,26 @@ async def chat_handler(message: Message):
         r_name = " ".join(params[1:])
         chat_data["role_names"][lvl_key] = r_name
         save_db(db)
-        return await message.answer(f"✅ Новая роль создана: `{lvl_key} lvl` ➔ **{r_name}**")
+        return await message.answer(f"✅ Роль для уровня `{lvl_key} lvl` установлена: **{r_name}**")
 
     elif cmd in ["delrole", "удалитьроль"]:
         if user_lvl < 90:
             return await message.answer(f"❌ Требуется 90+ уровень (у вас: {user_lvl}).")
         if not params or not params[0].isdigit():
-            return await message.answer("❌ Укажите числовой уровень роли.")
+            return await message.answer("❌ Укажите числовой уровень роли, например: `/удалитьроль 75`")
         lvl_key = str(int(params[0]))
         if lvl_key in chat_data["role_names"]:
             del chat_data["role_names"][lvl_key]
             save_db(db)
-            return await message.answer(f"🗑 Роль уровня `{lvl_key}` удалена.")
+            return await message.answer(f"🗑 Роль уровня `{lvl_key}` удалена из списка беседы.")
         return await message.answer("❌ Указанная роль не найдена.")
+
+    elif cmd in ["resetroles", "сбросролей"]:
+        if user_lvl < 90:
+            return await message.answer(f"❌ Требуется 90+ уровень (у вас: {user_lvl}).")
+        chat_data["role_names"] = {str(k): v for k, v in DEFAULT_ROLES.items()}
+        save_db(db)
+        return await message.answer("♻️ Список ролей беседы сброшен к стандартному.")
 
     elif cmd in ["setadmin", "сетадмин", "выдатьадм", "выдатьроль", "роль"]:
         if user_lvl < 70:
@@ -1165,13 +1265,6 @@ async def chat_handler(message: Message):
             return await message.answer("👔 Список лидеров организаций пока пуст.")
         lines = [f"• {await format_vk_user(int(l_id))} ➔ **{org}**" for l_id, org in db["leaders"].items()]
         return await message.answer("👔 **ЛИДЕРЫ ОРГАНИЗАЦИЙ:**\n\n" + "\n".join(lines))
-
-    elif cmd in ["bonus", "бонус"]:
-        return await message.answer(
-            "🎁 **БОНУСЫ PRINCE RUSSIA**\n\n"
-            "• Официальный портал: https://site-prince-russia.samp.date/\n"
-            "• Следи за новостями в беседах и на форуме проекта!"
-        )
 
     elif cmd in ["grole", "гроль"]:
         if user_lvl < 95:
@@ -1263,7 +1356,7 @@ async def chat_handler(message: Message):
 
 
 # =====================================================================
-# 5. ЗАПУСК БОТА
+# 6. ЗАПУСК БОТА
 # =====================================================================
 if __name__ == "__main__":
     bot.run_forever()
