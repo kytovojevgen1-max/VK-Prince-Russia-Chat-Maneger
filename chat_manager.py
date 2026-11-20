@@ -52,7 +52,8 @@ DEFAULT_ROLES = {
 
 WELCOME_GUIDE = (
     "👋 **Привет! Чат-менеджер PRINCE RUSSIA подключен к беседе!**\n\n"
-    "👑 **Владелец чата автоматически получает `100 lvl` админки** и отображается в `/admins` (`/админс`) и `/stats` (`/стата`).\n"
+    "👑 **Владелец чата получает `100 lvl` админки** и отображается в `/admins` (`/админс`) и `/stats` (`/стата`).\n"
+    "Если бот не определил владельца автоматически — пропиши `/явладелец` (если владелец в чате ещё не задан) или `/сетвладелец @ник`.\n"
     "📌 *Совет:* выдай боту права администратора в чате, чтобы работали кики, баны, муты, очистка и закреп сообщений.\n\n"
     "⚡ **Быстрый старт:**\n"
     "• `/menu` или `меню` — интерактивные кнопки в беседе\n"
@@ -124,7 +125,7 @@ def get_chat_data(peer_id):
     chat.setdefault("antispam", False)
     return chat
 
-async def resolve_chat_owner(peer_id, chat_data: dict, sender_id: int | None = None):
+async def resolve_chat_owner(peer_id, chat_data: dict):
     title = f"Беседа {peer_id}"
     vk_owner_id = None
 
@@ -144,9 +145,6 @@ async def resolve_chat_owner(peer_id, chat_data: dict, sender_id: int | None = N
 
     if vk_owner_id:
         chat_data["owner_id"] = vk_owner_id
-    elif not chat_data.get("owner_id") and sender_id and sender_id > 0:
-        # Если VK не отдал владельца чата и владелец ещё не зафиксирован, фиксируем первого написавшего в беседе
-        chat_data["owner_id"] = int(sender_id)
 
     owner_id = chat_data.get("owner_id")
     if owner_id:
@@ -170,7 +168,7 @@ def is_chat_owner(uid: int, chat_data: dict, owner_id: int | None) -> bool:
     return False
 
 def get_user_level_by_id(uid: int, chat_data: dict, owner_id: int | None) -> int:
-    # 1. Владелец чата всегда получает 100 уровень в своём чате
+    # 1. Реальный владелец беседы всегда получает 100 уровень в своём чате
     if is_chat_owner(uid, chat_data, owner_id):
         return 100
 
@@ -189,7 +187,7 @@ def get_user_level_by_id(uid: int, chat_data: dict, owner_id: int | None) -> int
     if str(uid) in db.get("global_roles", {}):
         return int(db["global_roles"][str(uid)])
 
-    # 4. В чатах, где пользователь не владелец и ему не выдан ранг — 0 lvl (обычный участник)
+    # 4. Во всех остальных случаях (включая чаты, где ты просто участник) — 0 lvl
     return 0
 
 def get_role_title(lvl: int, chat_data: dict, owner_flag: bool = False) -> str:
@@ -311,7 +309,7 @@ async def private_start(message: Message):
     await message.answer(
         "👑 **PRINCE RUSSIA — ULTIMATE ADMIN CONTROL x500** 👑\n\n"
         "Добро пожаловать в центр управления сетью чатов проекта.\n"
-        "Владелец каждой беседы автоматически получает `100 lvl`.",
+        "Владелец каждой беседы получает `100 lvl`.",
         keyboard=kb.get_json()
     )
 
@@ -424,11 +422,7 @@ async def chat_handler(message: Message):
     if is_new_chat:
         db["global_chats"].append(peer_id)
 
-    inviter_id = None
-    if message.action and message.action.type == "chat_invite_user":
-        inviter_id = uid_int
-
-    chat_title, owner_id = await resolve_chat_owner(peer_id, chat_data, sender_id=inviter_id or uid_int)
+    chat_title, owner_id = await resolve_chat_owner(peer_id, chat_data)
     save_db(db)
 
     # Приветствие и инструкция при добавлении бота в беседу
@@ -527,7 +521,7 @@ async def chat_handler(message: Message):
         r_list = "📋 **ИЕРАРХИЯ ДОЛЖНОСТЕЙ PRINCE RUSSIA:**\n\n"
         all_roles = {**db["global_role_names"], **chat_data["role_names"]}
         for lvl in sorted((int(k) for k in all_roles.keys()), reverse=True):
-            title = all_roles.get(lvl) or all_roles.get(str(lvl))
+            title = all_roles.get(lvl) or all_r_val if (all_r_val := all_roles.get(str(lvl))) else "Роль"
             r_list += f"• `{lvl} lvl` ➔ **{title}**\n"
         return await message.answer(r_list, keyboard=get_chat_inline_keyboard())
 
@@ -619,6 +613,16 @@ async def chat_handler(message: Message):
             )
         return await message.answer(help_msg, keyboard=get_chat_inline_keyboard())
 
+    elif cmd in ["явладелец", "claimowner"]:
+        if chat_data.get("owner_id"):
+            return await message.answer(
+                f"❌ Владелец в этой беседе уже зафиксирован: {await format_vk_user(int(chat_data['owner_id']))}."
+            )
+        chat_data["owner_id"] = int(uid_int)
+        await resolve_chat_owner(peer_id, chat_data)
+        save_db(db)
+        return await message.answer(f"👑 Вы закреплены владельцем этой беседы (`100 lvl`).")
+
     elif cmd in ["ping", "пинг"]:
         start_t = time.time()
         await message.answer("🏓 Измеряем задержку...")
@@ -641,7 +645,7 @@ async def chat_handler(message: Message):
             f"• Аптайм сервера: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Подключено чатов: `{chats_count}`\n"
             f"• Репортов в базе: `{len(db.get('reports', []))}`\n"
-            f"• Версия сборки: `v10.2 Clean Owner & Rank Logic`"
+            f"• Версия сборки: `v10.3 Strict Owner Fix`"
         )
 
     elif cmd in ["info", "инфо"]:
@@ -1062,7 +1066,7 @@ async def chat_handler(message: Message):
         if not tid:
             return await message.answer("❌ Формат: `/сетвладелец [@ник/id/ответ]`")
         chat_data["owner_id"] = int(tid)
-        await resolve_chat_owner(peer_id, chat_data, sender_id=int(tid))
+        await resolve_chat_owner(peer_id, chat_data)
         save_db(db)
         return await message.answer(f"👑 Владельцем чата закреплён {await format_vk_user(tid)} (`100 lvl`).")
 
