@@ -33,7 +33,7 @@ Thread(target=run_flask, daemon=True).start()
 TOKEN = "vk1.a.qGTN_rCK6d4Yg4ty8YkruE6DbovbX5lwzHcQcN6wQ15aACfSrhsyi5F7R9xip5mq03EeLvxI2gZwJSVvuWMv0eP7vv59FFJvPNYWpRI7R2nzXM0gbobnLpmRaI3yM751Cml4ZOPDcIc380c3hekN0jgZ3QeP76p9hn1Sw6kwK6mOCyomwB33nVy1uBGAbC0mDQpu5eiq2HlVDAKi4YjHYw"
 bot = Bot(token=TOKEN)
 
-MAIN_OWNER_ID = 897082738  # Главный VK ID (доступ к панели рассылки в ЛС)
+MAIN_OWNER_ID = 897082738  # Доступ к панели рассылки в ЛС
 DB_FILE = "chat_manager_db.json"
 
 DEFAULT_ROLES = {
@@ -110,7 +110,7 @@ def get_chat_data(peer_id):
             "mutes": {},
             "role_names": DEFAULT_ROLES.copy(),
             "welcomed": False,
-            "custom_owner_id": None,
+            "owner_id": None,
             "antispam": False
         }
     chat = db["chats"][p_str]
@@ -120,13 +120,14 @@ def get_chat_data(peer_id):
     chat.setdefault("mutes", {})
     chat.setdefault("role_names", DEFAULT_ROLES.copy())
     chat.setdefault("welcomed", False)
-    chat.setdefault("custom_owner_id", None)
+    chat.setdefault("owner_id", None)
     chat.setdefault("antispam", False)
     return chat
 
-async def get_chat_meta(peer_id, chat_data: dict | None = None):
+async def resolve_chat_owner(peer_id, chat_data: dict, sender_id: int | None = None):
     title = f"Беседа {peer_id}"
-    owner_id = None
+    vk_owner_id = None
+
     try:
         chat_info = await bot.api.messages.get_conversations_by_peer_ids(peer_ids=[peer_id])
         if chat_info and chat_info.items:
@@ -136,63 +137,68 @@ async def get_chat_meta(peer_id, chat_data: dict | None = None):
                 if getattr(settings, "title", None):
                     title = settings.title
                 raw_owner = getattr(settings, "owner_id", None)
-                if raw_owner is not None and int(raw_owner) != 0:
-                    owner_id = int(raw_owner)
+                if raw_owner is not None and int(raw_owner) > 0:
+                    vk_owner_id = int(raw_owner)
     except Exception:
         pass
 
-    if not owner_id and chat_data and chat_data.get("custom_owner_id"):
-        owner_id = int(chat_data["custom_owner_id"])
+    if vk_owner_id:
+        chat_data["owner_id"] = vk_owner_id
+    elif not chat_data.get("owner_id") and sender_id and sender_id > 0:
+        # Если VK не отдал владельца чата и владелец ещё не зафиксирован, фиксируем первого написавшего в беседе
+        chat_data["owner_id"] = int(sender_id)
 
-    return title, owner_id
+    owner_id = chat_data.get("owner_id")
+    if owner_id:
+        o_str = str(owner_id)
+        current_data = chat_data["members"].get(o_str, {})
+        nick = current_data.get("nickname", "") if isinstance(current_data, dict) else ""
+        chat_data["members"][o_str] = {
+            "level": 100,
+            "nickname": nick,
+            "is_owner": True
+        }
 
-def sync_chat_owner(chat_data: dict, chat_owner_id: int | None):
-    if not chat_owner_id:
-        return
-    o_str = str(chat_owner_id)
-    current_data = chat_data["members"].get(o_str, {})
-    nick = current_data.get("nickname", "") if isinstance(current_data, dict) else ""
-    chat_data["members"][o_str] = {
-        "level": 100,
-        "nickname": nick,
-        "is_owner": True
-    }
+    return title, int(owner_id) if owner_id else None
 
-def is_chat_owner(uid: int, chat_data: dict, chat_owner_id: int | None) -> bool:
-    if chat_owner_id and int(uid) == int(chat_owner_id):
+def is_chat_owner(uid: int, chat_data: dict, owner_id: int | None) -> bool:
+    if owner_id and int(uid) == int(owner_id):
         return True
-    custom_o = chat_data.get("custom_owner_id")
-    if custom_o and int(uid) == int(custom_o):
-        return True
-    m_info = chat_data.get("members", {}).get(str(uid))
-    if isinstance(m_info, dict) and m_info.get("is_owner"):
+    saved_owner = chat_data.get("owner_id")
+    if saved_owner and int(uid) == int(saved_owner):
         return True
     return False
 
-def get_user_level_by_id(uid: int, chat_data: dict, chat_owner_id: int | None) -> int:
-    # Владелец беседы всегда получает 100 уровень в своём чате
-    if is_chat_owner(uid, chat_data, chat_owner_id):
+def get_user_level_by_id(uid: int, chat_data: dict, owner_id: int | None) -> int:
+    # 1. Владелец чата всегда получает 100 уровень в своём чате
+    if is_chat_owner(uid, chat_data, owner_id):
         return 100
 
-    # Глобальная роль в сети (если выдана через /гроль)
+    # 2. Локальная роль в этом чате (выданная владельцем или админом)
+    m_info = chat_data.get("members", {}).get(str(uid), 0)
+    if isinstance(m_info, dict):
+        lvl = int(m_info.get("level", 0))
+        if lvl > 0:
+            return lvl
+    elif isinstance(m_info, (int, float)):
+        lvl = int(m_info)
+        if lvl > 0:
+            return lvl
+
+    # 3. Глобальная роль в сети (если явно выдана через /гроль)
     if str(uid) in db.get("global_roles", {}):
         return int(db["global_roles"][str(uid)])
 
-    # Локальная роль в конкретной беседе
-    m_info = chat_data.get("members", {}).get(str(uid), 0)
-    if isinstance(m_info, dict):
-        return int(m_info.get("level", 0))
-    elif isinstance(m_info, (int, float)):
-        return int(m_info)
-
+    # 4. В чатах, где пользователь не владелец и ему не выдан ранг — 0 lvl (обычный участник)
     return 0
 
 def get_role_title(lvl: int, chat_data: dict, owner_flag: bool = False) -> str:
-    if owner_flag or lvl >= 100:
-        all_r = {**db["global_role_names"], **chat_data["role_names"]}
-        return all_r.get(100) or all_r.get("100") or "👑 Владелец / Основатель"
     all_r = {**db["global_role_names"], **chat_data["role_names"]}
-    return all_r.get(lvl) or all_r.get(str(lvl)) or ("Администратор" if lvl > 0 else "Участник")
+    if owner_flag or lvl >= 100:
+        return all_r.get(100) or all_r.get("100") or "👑 Владелец / Основатель"
+    if lvl <= 0:
+        return "Участник"
+    return all_r.get(lvl) or all_r.get(str(lvl)) or "Администратор"
 
 async def format_vk_user(uid: int) -> str:
     if uid <= 0:
@@ -305,7 +311,7 @@ async def private_start(message: Message):
     await message.answer(
         "👑 **PRINCE RUSSIA — ULTIMATE ADMIN CONTROL x500** 👑\n\n"
         "Добро пожаловать в центр управления сетью чатов проекта.\n"
-        "Бот работает в любых чатах: владелец каждой беседы автоматически получает `100 lvl`.",
+        "Владелец каждой беседы автоматически получает `100 lvl`.",
         keyboard=kb.get_json()
     )
 
@@ -410,16 +416,19 @@ async def private_handler(message: Message):
 @bot.on.chat_message()
 async def chat_handler(message: Message):
     peer_id = message.peer_id
+    uid_int = message.from_id
+    uid_str = str(uid_int)
     chat_data = get_chat_data(peer_id)
-    chat_title, chat_owner_id = await get_chat_meta(peer_id, chat_data)
 
     is_new_chat = peer_id not in db["global_chats"]
     if is_new_chat:
         db["global_chats"].append(peer_id)
 
-    effective_owner_id = chat_owner_id or chat_data.get("custom_owner_id")
-    if effective_owner_id:
-        sync_chat_owner(chat_data, int(effective_owner_id))
+    inviter_id = None
+    if message.action and message.action.type == "chat_invite_user":
+        inviter_id = uid_int
+
+    chat_title, owner_id = await resolve_chat_owner(peer_id, chat_data, sender_id=inviter_id or uid_int)
     save_db(db)
 
     # Приветствие и инструкция при добавлении бота в беседу
@@ -441,9 +450,6 @@ async def chat_handler(message: Message):
             except Exception:
                 pass
             return
-
-    uid_int = message.from_id
-    uid_str = str(uid_int)
 
     # Проверка активного мута
     if uid_str in chat_data.get("mutes", {}):
@@ -468,7 +474,7 @@ async def chat_handler(message: Message):
     raw_text = text.strip()
     clean_text = raw_text.lower()
 
-    user_lvl = get_user_level_by_id(uid_int, chat_data, effective_owner_id)
+    user_lvl = get_user_level_by_id(uid_int, chat_data, owner_id)
     if chat_data.get("antispam") and user_lvl < 45:
         if any(bad in clean_text for bad in ["http://", "https://", "t.me/", "vk.me/", "discord.gg/"]):
             try:
@@ -635,11 +641,11 @@ async def chat_handler(message: Message):
             f"• Аптайм сервера: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Подключено чатов: `{chats_count}`\n"
             f"• Репортов в базе: `{len(db.get('reports', []))}`\n"
-            f"• Версия сборки: `v10.1 Roles & Owner Fix`"
+            f"• Версия сборки: `v10.2 Clean Owner & Rank Logic`"
         )
 
     elif cmd in ["info", "инфо"]:
-        owner_fmt = await format_vk_user(int(effective_owner_id)) if effective_owner_id else "Не определён (можно задать `/сетвладелец @ник`)"
+        owner_fmt = await format_vk_user(int(owner_id)) if owner_id else "Не определён"
         antispam_str = "🟢 Включён" if chat_data.get("antispam") else "🔴 Выключен"
         return await message.answer(
             f"ℹ️ **ИНФОРМАЦИЯ О БЕСЕДЕ**\n\n"
@@ -647,7 +653,7 @@ async def chat_handler(message: Message):
             f"• Peer ID: `{peer_id}`\n"
             f"• Владелец: {owner_fmt}\n"
             f"• Антиспам ссылок: {antispam_str}\n"
-            f"• Ваш уровень: `{user_lvl} lvl` ({get_role_title(user_lvl, chat_data, is_chat_owner(uid_int, chat_data, effective_owner_id))})\n"
+            f"• Ваш уровень: `{user_lvl} lvl` ({get_role_title(user_lvl, chat_data, is_chat_owner(uid_int, chat_data, owner_id))})\n"
             f"• Участников в базе чата: `{len(chat_data.get('members', {}))}`"
         )
 
@@ -672,10 +678,10 @@ async def chat_handler(message: Message):
         sender_fmt = await format_vk_user(uid_int)
         add_log(f"Репорт #{rep_id} в «{chat_title}» от {sender_fmt}: {rep_text}")
 
-        if effective_owner_id and int(effective_owner_id) != uid_int:
+        if owner_id and int(owner_id) != uid_int:
             try:
                 await bot.api.messages.send(
-                    peer_id=int(effective_owner_id),
+                    peer_id=int(owner_id),
                     message=(
                         f"📩 **НОВЫЙ РЕПОРТ #{rep_id}**\n"
                         f"• Беседа: **{chat_title}** (`{peer_id}`)\n"
@@ -741,7 +747,7 @@ async def chat_handler(message: Message):
         new_nick = " ".join(params).strip()
         if len(new_nick) > 40:
             return await message.answer("❌ Ник не длиннее 40 символов.")
-        current_lvl = get_user_level_by_id(uid_int, chat_data, effective_owner_id)
+        current_lvl = get_user_level_by_id(uid_int, chat_data, owner_id)
         if uid_str not in chat_data["members"] or not isinstance(chat_data["members"][uid_str], dict):
             chat_data["members"][uid_str] = {"level": current_lvl, "nickname": new_nick}
         else:
@@ -778,7 +784,7 @@ async def chat_handler(message: Message):
             return await message.answer("❌ Укажите текст никнейма.")
 
         t_str = str(target_id)
-        current_lvl = get_user_level_by_id(target_id, chat_data, effective_owner_id)
+        current_lvl = get_user_level_by_id(target_id, chat_data, owner_id)
 
         if t_str not in chat_data["members"] or not isinstance(chat_data["members"][t_str], dict):
             chat_data["members"][t_str] = {"level": current_lvl, "nickname": new_nick}
@@ -807,8 +813,8 @@ async def chat_handler(message: Message):
             target_id = uid_int
 
         t_str = str(target_id)
-        owner_flag = is_chat_owner(target_id, chat_data, effective_owner_id)
-        target_lvl = 100 if owner_flag else get_user_level_by_id(target_id, chat_data, effective_owner_id)
+        owner_flag = is_chat_owner(target_id, chat_data, owner_id)
+        target_lvl = 100 if owner_flag else get_user_level_by_id(target_id, chat_data, owner_id)
         r_name = get_role_title(target_lvl, chat_data, owner_flag=owner_flag)
 
         m_info = chat_data["members"].get(t_str, {})
@@ -828,8 +834,8 @@ async def chat_handler(message: Message):
         if not target_id:
             target_id = uid_int
         t_str = str(target_id)
-        owner_flag = is_chat_owner(target_id, chat_data, effective_owner_id)
-        target_lvl = 100 if owner_flag else get_user_level_by_id(target_id, chat_data, effective_owner_id)
+        owner_flag = is_chat_owner(target_id, chat_data, owner_id)
+        target_lvl = 100 if owner_flag else get_user_level_by_id(target_id, chat_data, owner_id)
         r_name = get_role_title(target_lvl, chat_data, owner_flag=owner_flag)
         m_info = chat_data["members"].get(t_str, {})
         nick = m_info.get("nickname", "Нет") if isinstance(m_info, dict) and m_info.get("nickname") else "Нет"
@@ -1055,10 +1061,10 @@ async def chat_handler(message: Message):
         tid, _ = await resolve_target(message, params)
         if not tid:
             return await message.answer("❌ Формат: `/сетвладелец [@ник/id/ответ]`")
-        chat_data["custom_owner_id"] = int(tid)
-        sync_chat_owner(chat_data, int(tid))
+        chat_data["owner_id"] = int(tid)
+        await resolve_chat_owner(peer_id, chat_data, sender_id=int(tid))
         save_db(db)
-        return await message.answer(f"👑 Владельцем чата в системе закреплён {await format_vk_user(tid)} (`100 lvl`).")
+        return await message.answer(f"👑 Владельцем чата закреплён {await format_vk_user(tid)} (`100 lvl`).")
 
     elif cmd in ["newrole", "новаяроль"]:
         if user_lvl < 90:
@@ -1191,8 +1197,8 @@ async def chat_handler(message: Message):
         lines = []
         shown_ids = set()
 
-        if effective_owner_id:
-            owner_int = int(effective_owner_id)
+        if owner_id:
+            owner_int = int(owner_id)
             shown_ids.add(owner_int)
             o_info = chat_data["members"].get(str(owner_int))
             o_nick = f" — `{o_info['nickname']}`" if isinstance(o_info, dict) and o_info.get("nickname") else ""
@@ -1224,13 +1230,13 @@ async def chat_handler(message: Message):
 
     elif cmd in ["staff", "состав"]:
         parts = []
-        if effective_owner_id:
-            parts.append(f"👑 **Владелец чата:** {await format_vk_user(int(effective_owner_id))} (`100 lvl`)")
+        if owner_id:
+            parts.append(f"👑 **Владелец чата:** {await format_vk_user(int(owner_id))} (`100 lvl`)")
 
         adm_lines = []
         for m_id, info in chat_data.get("members", {}).items():
             lvl = info.get("level", 0) if isinstance(info, dict) else int(info or 0)
-            if lvl > 0 and int(m_id) != int(effective_owner_id or 0):
+            if lvl > 0 and int(m_id) != int(owner_id or 0):
                 adm_lines.append(f"• {await format_vk_user(int(m_id))} — **{get_role_title(lvl, chat_data)}** `[{lvl} lvl]`")
         if adm_lines:
             parts.append("🛡 **Администраторы:**\n" + "\n".join(adm_lines))
