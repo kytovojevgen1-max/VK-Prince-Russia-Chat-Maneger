@@ -53,7 +53,7 @@ DEFAULT_ROLES = {
 WELCOME_GUIDE = (
     "👋 **Привет! Чат-менеджер PRINCE RUSSIA подключен к беседе!**\n\n"
     "👑 **Владелец чата получает `100 lvl` админки** и отображается в `/admins` (`/админс`) и `/stats` (`/стата`).\n"
-    "Если бот не определил владельца автоматически — пропиши `/явладелец` (если владелец в чате ещё не задан) или `/сетвладелец @ник`.\n"
+    "Если бот не определил владельца автоматически — владелец чата может прописать `/явладелец` (если владелец ещё не задан) или `/сетвладелец @ник`.\n"
     "📌 *Совет:* выдай боту права администратора в чате, чтобы работали кики, баны, муты, очистка и закреп сообщений.\n\n"
     "⚡ **Быстрый старт:**\n"
     "• `/menu` или `меню` — интерактивные кнопки в беседе\n"
@@ -125,6 +125,19 @@ def get_chat_data(peer_id):
     chat.setdefault("antispam", False)
     return chat
 
+def sync_owner_member(chat_data: dict, owner_id: int | None):
+    if owner_id and int(owner_id) > 0:
+        oid = int(owner_id)
+        chat_data["owner_id"] = oid
+        o_str = str(oid)
+        current_data = chat_data["members"].get(o_str, {})
+        nick = current_data.get("nickname", "") if isinstance(current_data, dict) else ""
+        chat_data["members"][o_str] = {
+            "level": 100,
+            "nickname": nick,
+            "is_owner": True
+        }
+
 async def resolve_chat_owner(peer_id, chat_data: dict):
     title = f"Беседа {peer_id}"
     vk_owner_id = None
@@ -148,14 +161,7 @@ async def resolve_chat_owner(peer_id, chat_data: dict):
 
     owner_id = chat_data.get("owner_id")
     if owner_id:
-        o_str = str(owner_id)
-        current_data = chat_data["members"].get(o_str, {})
-        nick = current_data.get("nickname", "") if isinstance(current_data, dict) else ""
-        chat_data["members"][o_str] = {
-            "level": 100,
-            "nickname": nick,
-            "is_owner": True
-        }
+        sync_owner_member(chat_data, int(owner_id))
 
     return title, int(owner_id) if owner_id else None
 
@@ -168,11 +174,9 @@ def is_chat_owner(uid: int, chat_data: dict, owner_id: int | None) -> bool:
     return False
 
 def get_user_level_by_id(uid: int, chat_data: dict, owner_id: int | None) -> int:
-    # 1. Реальный владелец беседы всегда получает 100 уровень в своём чате
     if is_chat_owner(uid, chat_data, owner_id):
         return 100
 
-    # 2. Локальная роль в этом чате (выданная владельцем или админом)
     m_info = chat_data.get("members", {}).get(str(uid), 0)
     if isinstance(m_info, dict):
         lvl = int(m_info.get("level", 0))
@@ -183,11 +187,9 @@ def get_user_level_by_id(uid: int, chat_data: dict, owner_id: int | None) -> int
         if lvl > 0:
             return lvl
 
-    # 3. Глобальная роль в сети (если явно выдана через /гроль)
     if str(uid) in db.get("global_roles", {}):
         return int(db["global_roles"][str(uid)])
 
-    # 4. Во всех остальных случаях (включая чаты, где ты просто участник) — 0 lvl
     return 0
 
 def get_role_title(lvl: int, chat_data: dict, owner_flag: bool = False) -> str:
@@ -425,7 +427,6 @@ async def chat_handler(message: Message):
     chat_title, owner_id = await resolve_chat_owner(peer_id, chat_data)
     save_db(db)
 
-    # Приветствие и инструкция при добавлении бота в беседу
     if message.action and message.action.type == "chat_invite_user":
         j_id = message.action.member_id
         group_id = getattr(message, "group_id", None)
@@ -445,7 +446,6 @@ async def chat_handler(message: Message):
                 pass
             return
 
-    # Проверка активного мута
     if uid_str in chat_data.get("mutes", {}):
         if time.time() < chat_data["mutes"][uid_str]:
             try:
@@ -489,7 +489,6 @@ async def chat_handler(message: Message):
                 raw_text = parts[1].strip()
                 clean_text = raw_text.lower()
 
-    # --- ОБРАБОТКА КНОПОК И БЫСТРЫХ ФРАЗ ---
     if clean_text in ["/menu", "/panel", "/панель", "меню", "панель"]:
         return await message.answer("👑 **ПАНЕЛЬ УПРАВЛЕНИЯ БЕСЕДОЙ**", keyboard=get_chat_inline_keyboard())
 
@@ -512,7 +511,7 @@ async def chat_handler(message: Message):
             "• `55+ lvl`: `/бан`, `/анбан`, `/банлист`, `/снятьвсеварны`\n"
             "• `60+ lvl`: `/сник`, `/делник`, `/сетлидер`, `/снятлидера`, `/ответить`\n"
             "• `70+ lvl`: `/сетадмин`, `/снятьроль`, `/логи`, `/размутвсех`, `/антиспам`\n"
-            "• `90+ lvl`: `/сетвладелец`, `/гбан`, `/новаяроль`, `/удалитьроль`\n\n"
+            "• `90+ lvl`: `/сетвладелец`, `/сбросвладельца`, `/гбан`, `/новаяроль`, `/удалитьроль`\n\n"
             "💡 *Пример:* `/сетадмин @evgenn09 70` или `/сник @evgenn09 Куратор`",
             keyboard=get_chat_inline_keyboard()
         )
@@ -544,7 +543,6 @@ async def chat_handler(message: Message):
     cmd = args[0].lower() if args else ""
     params = args[1:] if len(args) > 1 else []
 
-    # --- СПРАВКА / HELP ---
     if cmd in ["help", "хелп"]:
         help_msg = (
             "📖 **ЭКСКЛЮЗИВНЫЙ СПИСОК КОМАНД PRINCE RUSSIA x500** 📖\n\n"
@@ -562,7 +560,8 @@ async def chat_handler(message: Message):
             "• `/info` (`/инфо`) — информация о беседе\n"
             "• `/репорт [текст]` (`/report`) — создать тикет/репорт\n"
             "• `/бонус` (`/bonus`) — бонусы проекта\n"
-            "• `/пинг` (`/ping`) и `/статус` (`/status`) — пинг и аптайм\n\n"
+            "• `/пинг` (`/ping`) и `/статус` (`/status`) — пинг и аптайм\n"
+            "• `/явладелец` — закрепить владельца беседы (`100 lvl`), если он ещё не задан\n\n"
         )
         if user_lvl >= 45:
             help_msg += (
@@ -607,6 +606,7 @@ async def chat_handler(message: Message):
             help_msg += (
                 "🔥 **Высший состав (90+ lvl):**\n"
                 "• `/сетвладелец` (`/setowner`) `[@ник/id/ответ]` — закрепить владельца чата\n"
+                "• `/сбросвладельца` (`/resetowner`) — сбросить владельца чата\n"
                 "• `/гбан` (`/gban`) `[@ник/id/ответ] [причина]` — глобальный бан\n"
                 "• `/новаяроль` (`/newrole`) `[ур] [Название]` — создать роль\n"
                 "• `/удалитьроль` (`/delrole`) `[ур]` — удалить роль\n"
@@ -618,10 +618,19 @@ async def chat_handler(message: Message):
             return await message.answer(
                 f"❌ Владелец в этой беседе уже зафиксирован: {await format_vk_user(int(chat_data['owner_id']))}."
             )
-        chat_data["owner_id"] = int(uid_int)
-        await resolve_chat_owner(peer_id, chat_data)
+        sync_owner_member(chat_data, int(uid_int))
         save_db(db)
-        return await message.answer(f"👑 Вы закреплены владельцем этой беседы (`100 lvl`).")
+        return await message.answer("👑 Вы закреплены владельцем этой беседы (`100 lvl`).")
+
+    elif cmd in ["сбросвладельца", "resetowner"]:
+        if user_lvl < 90:
+            return await message.answer(f"❌ Требуется 90+ уровень (у вас: {user_lvl}).")
+        old_owner = chat_data.get("owner_id")
+        chat_data["owner_id"] = None
+        if old_owner and str(old_owner) in chat_data["members"]:
+            del chat_data["members"][str(old_owner)]
+        save_db(db)
+        return await message.answer("♻️ Владелец беседы сброшен. Теперь можно назначить нового через `/сетвладелец` или `/явладелец`.")
 
     elif cmd in ["ping", "пинг"]:
         start_t = time.time()
@@ -645,7 +654,7 @@ async def chat_handler(message: Message):
             f"• Аптайм сервера: `{hours}ч {minutes}м {seconds}с`\n"
             f"• Подключено чатов: `{chats_count}`\n"
             f"• Репортов в базе: `{len(db.get('reports', []))}`\n"
-            f"• Версия сборки: `v10.3 Strict Owner Fix`"
+            f"• Версия сборки: `v10.4 Fixed Owner Sync`"
         )
 
     elif cmd in ["info", "инфо"]:
@@ -1065,8 +1074,7 @@ async def chat_handler(message: Message):
         tid, _ = await resolve_target(message, params)
         if not tid:
             return await message.answer("❌ Формат: `/сетвладелец [@ник/id/ответ]`")
-        chat_data["owner_id"] = int(tid)
-        await resolve_chat_owner(peer_id, chat_data)
+        sync_owner_member(chat_data, int(tid))
         save_db(db)
         return await message.answer(f"👑 Владельцем чата закреплён {await format_vk_user(tid)} (`100 lvl`).")
 
